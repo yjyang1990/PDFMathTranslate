@@ -5,15 +5,17 @@ import tempfile
 from pathlib import Path
 
 import gradio as gr
-import pymupdf
 import numpy as np
+import pymupdf
+
 
 def pdf_preview(file):
-    doc=pymupdf.open(file)
-    page=doc[0]
-    pix=page.get_pixmap()
-    image=np.frombuffer(pix.samples, np.uint8).reshape(pix.height, pix.width, 3)
+    doc = pymupdf.open(file)
+    page = doc[0]
+    pix = page.get_pixmap()
+    image = np.frombuffer(pix.samples, np.uint8).reshape(pix.height, pix.width, 3)
     return image
+
 
 def upload_file(file, service, progress=gr.Progress()):
     """Handle file upload, validation, and initial preview."""
@@ -23,7 +25,7 @@ def upload_file(file, service, progress=gr.Progress()):
     progress(0.3, desc="Converting PDF for preview...")
     try:
         # Convert first page for preview
-        preview_image=pdf_preview(file)
+        preview_image = pdf_preview(file)
 
         return file, preview_image, gr.update(visible=True)
     except Exception as e:
@@ -31,7 +33,9 @@ def upload_file(file, service, progress=gr.Progress()):
         return None, None, gr.update(visible=False)
 
 
-def translate(file_path, service, progress=gr.Progress()):
+def translate(
+    file_path, service, lang_tgt, page_range, extra_args, progress=gr.Progress()
+):
     """Translate PDF content using selected service."""
     if not file_path:
         return None, None, gr.update(visible=False)
@@ -55,6 +59,7 @@ def translate(file_path, service, progress=gr.Progress()):
             "DeepL": "deepl",
             "DeepLX": "deeplx",
             "Ollama": "ollama:gemma2",
+            "Azure": "azure",
         }
         selected_service = service_map.get(service, "google")
         lang_to = "zh"
@@ -66,9 +71,37 @@ def translate(file_path, service, progress=gr.Progress()):
         output_dir = Path("gradio_files") / "outputs"
         output_dir.mkdir(parents=True, exist_ok=True)
         final_output = output_dir / f"translated_{os.path.basename(file_path)}"
+        # Prepare extra arguments
+        extra_args = extra_args.strip()
+        lang_tgt = lang_tgt.lower()
+        if lang_tgt == "chinese":
+            lang_tgt = "zh"
+        elif lang_tgt == "english":
+            lang_tgt = "en"
+        elif lang_tgt == "french":
+            lang_tgt = "fr"
+        elif lang_tgt == "german":
+            lang_tgt = "de"
+        elif lang_tgt == "japanese":
+            lang_tgt = "ja"
+        elif lang_tgt == "korean":
+            lang_tgt = "ko"
+        elif lang_tgt == "russian":
+            lang_tgt = "ru"
+        elif lang_tgt == "spanish":
+            lang_tgt = "es"
+        else:
+            lang_tgt = "zh"  # Default to Chinese
+        # Add page range arguments
+        if page_range == "All":
+            extra_args += ""
+        elif page_range == "First":
+            extra_args += " -p 1"
+        elif page_range == "First 5 pages":
+            extra_args += " -p 1-5"
 
         # Execute translation command
-        command = f'cd "{temp_path}" && pdf2zh "{input_pdf}" -s {selected_service}'
+        command = f'cd "{temp_path}" && pdf2zh "{input_pdf}" -lo {lang_tgt} -s {selected_service} {extra_args}'
         print(f"Executing command: {command}")
         print(f"Files in temp directory: {os.listdir(temp_path)}")
 
@@ -115,7 +148,7 @@ def translate(file_path, service, progress=gr.Progress()):
         # Generate preview of translated PDF
         progress(0.9, desc="Generating preview...")
         try:
-            translated_preview=pdf_preview(str(final_output))
+            translated_preview = pdf_preview(str(final_output))
         except Exception as e:
             print(f"Error generating preview: {e}")
             translated_preview = None
@@ -123,52 +156,148 @@ def translate(file_path, service, progress=gr.Progress()):
     progress(1.0, desc="Translation complete!")
     return str(final_output), translated_preview, gr.update(visible=True)
 
-def setup_gui():
-    with gr.Blocks(title="PDF Translation") as app:
-        gr.Markdown("# PDF Translation")
 
-        with gr.Row():
-            with gr.Column(scale=1):
-                service = gr.Dropdown(
-                    label="Service",
-                    choices=["Google", "DeepL", "DeepLX", "Ollama"],
-                    value="Google",
-                )
+# Global setup
+with gr.Blocks(
+    title="PDF2ZH - PDF Translation with preserved formats",
+    css="""
+    .secondary-text {color: #999 !important;}
+    footer {visibility: hidden}
+    .env-warning {color: #dd5500 !important;}
+    .env-success {color: #559900 !important;}
+    """,
+) as demo:
+    gr.Markdown("# PDF Translation")
 
-                file_input = gr.File(
-                    label="Upload",
-                    file_count="single",
-                    file_types=[".pdf"],
-                    type="filepath",
-                )
+    with gr.Row():
+        with gr.Column(scale=1):
+            gr.Markdown("## File")
+            file_input = gr.File(
+                label="Document",
+                file_count="single",
+                file_types=[".pdf"],
+                type="filepath",
+            )
+            gr.Markdown("## Option")
+            service = gr.Dropdown(
+                label="Service",
+                info="Which translation service to use. Some require keys",
+                choices=["Google", "DeepL", "DeepLX", "Ollama", "Azure"],
+                value="Google",
+            )
+            # lang_src = gr.Dropdown(
+            #     label="Source Language",
+            #     info="Which translation service to use. Some require keys",
+            #     choices=["Google", "DeepL", "DeepLX", "Ollama", "Azure"],
+            #     value="Google",
+            # )
+            lang_tgt = gr.Dropdown(
+                label="Translate to",
+                info="Which language to translate to (optional)",
+                choices=[
+                    "Chinese",
+                    "English",
+                    "French",
+                    "German",
+                    "Japanese",
+                    "Korean",
+                    "Russian",
+                    "Spanish",
+                ],
+                value="Chinese",
+            )
+            page_range = gr.Radio(
+                ["All", "First", "First 5 pages"],
+                label="Pages",
+                info="Translate the full document or just few pages (optional)",
+                value="All",
+            )
+            extra_args = gr.Textbox(
+                label="Advanced Arguments",
+                info="Extra arguments supported in commandline (optional)",
+                value="",
+            )
+            envs_status = "<span class='env-success'>- Properly configured.</span><br>"
 
-                output_file = gr.File(label="Download Translation", visible=False)
-                translate_btn = gr.Button("Translate", variant="primary", visible=False)
+            def details_wrapper(text_markdown):
+                text = f""" 
+                <details>
+                    <summary>Technical details</summary>
+                    {text_markdown}
+                    - GUI by: <a href="https://github.com/reycn">Rongxin</a>    
+                </details>"""
+                return text
+
+            def env_var_checker(env_var_name: str) -> str:
+                if (
+                    not os.environ.get(env_var_name)
+                    or os.environ.get(env_var_name) == ""
+                ):
+                    envs_status = f"<span class='env-warning'>- Warning: environmental not found or error ({env_var_name}).</span><br>- Please make sure that the environment variables are properly configured (<a href='https://github.com/Byaidu/PDFMathTranslate'>guide</a>).<br>"
+                else:
+                    value = str(os.environ.get(env_var_name))
+                    envs_status = (
+                        "<span class='env-success'>- Properly configured.</span><br>"
+                    )
+                    if len(value) < 13:
+                        envs_status += (
+                            f"- Env: <code>{os.environ.get(env_var_name)}</code><br>"
+                        )
+                    else:
+                        envs_status += f"- Env: <code>{value[:13]}***</code><br>"
+                return details_wrapper(envs_status)
+
+            def on_select_service(value, evt: gr.EventData):
                 # add a text description
-                gr.Markdown(
-                    """*Note: Please make sure that [pdf2zh](https://github.com/Byaidu/PDFMathTranslate) is correctly configured.*
-                    GUI implemented by: [Rongxin](https://github.com/reycn)
-                    [Early Version]
-                    """
-                )
+                if value == "Google":
+                    envs_status = details_wrapper(
+                        "<span class='env-success'>- Properly configured.</span><br>"
+                    )
 
-            with gr.Column(scale=2):
-                preview = gr.Image(label="Preview", visible=True)
+                elif value == "DeepL":
+                    envs_status = env_var_checker("DEEPL_AUTH_KEY")
+                elif value == "DeepLX":
+                    envs_status = env_var_checker("DEEPLX_AUTH_KEY")
+                elif value == "Azure":
+                    envs_status = env_var_checker("AZURE_APIKEY")
+                elif value == "OpenAI":
+                    envs_status = env_var_checker("OPENAI_API_KEY")
+                elif value == "Ollama":
+                    envs_status = env_var_checker("OLLAMA_HOST")
+                else:
+                    envs_status = "<span class='env-warning'>- Warning: model not in the list.</span><br>- Please report via (<a href='https://github.com/Byaidu/PDFMathTranslate'>guide</a>).<br>"
+                return envs_status
 
-        # Event handlers
-        file_input.upload(
-            upload_file,
-            inputs=[file_input, service],
-            outputs=[file_input, preview, translate_btn],
-        )
+            output_file = gr.File(label="Download Translation", visible=False)
+            translate_btn = gr.Button("Translate", variant="primary", visible=False)
+            tech_details_tog = gr.Markdown(
+                details_wrapper(envs_status),
+                elem_classes=["secondary-text"],
+            )
+            service.select(on_select_service, service, tech_details_tog)
 
-        translate_btn.click(
-            translate,
-            inputs=[file_input, service],
-            outputs=[output_file, preview, output_file],
-        )
+        with gr.Column(scale=2):
+            gr.Markdown("## Preview")
+            preview = gr.Image(label="Document Preview", visible=True)
 
-    app.launch(debug=True, inbrowser=True, share=False)
+    # Event handlers
+    file_input.upload(
+        upload_file,
+        inputs=[file_input, service],
+        outputs=[file_input, preview, translate_btn],
+    )
 
-if __name__ == '__main__':
-    setup_gui()
+    translate_btn.click(
+        translate,
+        inputs=[file_input, service, lang_tgt, page_range, extra_args],
+        outputs=[output_file, preview, output_file],
+    )
+
+
+def setup_gui():
+    demo.launch(debug=True, inbrowser=True, share=False)
+
+
+# For auto-reloading while developing
+if __name__ == "__main__":
+    demo.launch(debug=True, inbrowser=True, share=False)
