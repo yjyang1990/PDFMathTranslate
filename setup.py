@@ -31,6 +31,10 @@ setup(
         "openai",
         "azure-ai-translation-text<=1.0.1",
         "gradio",
+        "fastapi",
+        "uvicorn",
+        "python-multipart",
+        "python-dotenv",
     ],
     classifiers=[
         "Programming Language :: Python :: 3",
@@ -39,6 +43,7 @@ setup(
     entry_points={
         'console_scripts': [
             'pdf2zh=pdf2zh.pdf2zh:main',
+            'pdf2zh-api=pdf2zh.api:main',
         ]
     },
 )

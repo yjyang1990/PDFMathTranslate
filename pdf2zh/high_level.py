@@ -46,9 +46,9 @@ def extract_text_to_fp(
     thread: int = 0,
     doc_en: Document = None,
     model = None,
-    lang_in: str = "",
-    lang_out: str = "",
-    service: str = "",
+    lang_in: str = "en",
+    lang_out: str = "zh-CN",
+    service: str = "openai:gpt-4o-mini",
     **kwargs: Any,
 ) -> None:
     """Parses text from inf-file and writes to outfp file-like object.

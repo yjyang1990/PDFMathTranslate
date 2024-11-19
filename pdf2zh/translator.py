@@ -1,8 +1,11 @@
+import os
+from dotenv import load_dotenv
 import html
 import logging
-import os
 import re
 from json import dumps, loads
+import time
+from threading import Lock
 
 import deepl
 import ollama
@@ -11,6 +14,8 @@ import requests
 from azure.ai.translation.text import TextTranslationClient
 from azure.core.credentials import AzureKeyCredential
 
+# 在文件开头加载.env配置
+load_dotenv()
 
 class BaseTranslator:
     def __init__(self, service, lang_out, lang_in, model):
@@ -158,32 +163,100 @@ class OllamaTranslator(BaseTranslator):
         )
         return response["message"]["content"].strip()
 
+class RateLimiter:
+    def __init__(self, tokens_per_second):
+        self.tokens_per_second = tokens_per_second
+        self.tokens = tokens_per_second
+        self.last_update = time.time()
+        self.lock = Lock()
+
+    def acquire(self):
+        with self.lock:
+            now = time.time()
+            time_passed = now - self.last_update
+            self.tokens = min(
+                self.tokens_per_second,
+                self.tokens + time_passed * self.tokens_per_second
+            )
+            
+            if self.tokens < 1:
+                sleep_time = (1 - self.tokens) / self.tokens_per_second
+                time.sleep(sleep_time)
+                self.tokens = 0
+                self.last_update = time.time()
+            else:
+                self.tokens -= 1
+                self.last_update = now
+
 class OpenAITranslator(BaseTranslator):
     def __init__(self, service, lang_out, lang_in, model):
-        lang_out='zh-CN' if lang_out=='auto' else lang_out
-        lang_in='en' if lang_in=='auto' else lang_in
+        lang_out = 'zh-CN' if lang_out == 'auto' else lang_out
+        lang_in = 'en' if lang_in == 'auto' else lang_in
         super().__init__(service, lang_out, lang_in, model)
-        self.options = {"temperature": 0}  # 随机采样可能会打断公式标记
-        # OPENAI_BASE_URL
-        # OPENAI_API_KEY
+        self.options = {
+            "temperature": 0,  # 随机采样可能会打断公式标记
+            "stream": False  # 禁用流式响应
+        }
+        
+        # 从环境变量获取配置
+        openai.api_key = os.getenv('OPENAI_API_KEY')
+        openai.base_url = os.getenv('OPENAI_BASE_URL')
         self.client = openai.OpenAI()
+        
+        # 创建速率限制器，每分钟最多60个请求（每秒1个请求）
+        self.rate_limiter = RateLimiter(1.0)
 
     def translate(self, text) -> str:
-        response = self.client.chat.completions.create(
-            model=self.model,
-            **self.options,
-            messages=[
-                {
-                    "role": "system",
-                    "content": "You are a professional,authentic machine translation engine.",
-                },
-                {
-                    "role": "user",
-                    "content": f"Translate the following markdown source text to {self.lang_out}. Keep the formula notation $v*$ unchanged. Output translation directly without any additional text.\nSource Text: {text}\nTranslated Text:",
-                },
-            ],
-        )
-        return response.choices[0].message.content.strip()
+        if not text.strip():  # 如果文本为空，直接返回
+            return text
+            
+        try:
+            # 在发送请求前等待令牌
+            self.rate_limiter.acquire()
+            
+            response = self.client.chat.completions.create(
+                model=self.model,
+                **self.options,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "You are a professional,authentic machine translation engine.",
+                    },
+                    {
+                        "role": "user",
+                        "content": f"Translate the following markdown source text to {self.lang_out}. Keep the formula notation $v*$ unchanged. Output translation directly without any additional text.\nSource Text: {text}\nTranslated Text:",
+                    },
+                ],
+            )
+            
+            # 输出原始响应内容
+            logging.info(f"OpenAI API Response: {response}")
+            
+            # 处理不同的响应格式
+            if isinstance(response, str):
+                logging.info("Response is string type")
+                try:
+                    import json
+                    response_data = json.loads(response)
+                    result = response_data.get('choices', [{}])[0].get('message', {}).get('content', '').strip()
+                    logging.info(f"Parsed JSON result: {result}")
+                    return result
+                except (json.JSONDecodeError, KeyError, IndexError) as e:
+                    logging.error(f"JSON parsing error: {str(e)}")
+                    return response.strip() if response else text
+            else:
+                logging.info(f"Response type: {type(response)}")
+                try:
+                    result = response.choices[0].message.content.strip()
+                    logging.info(f"Object result: {result}")
+                    return result
+                except (AttributeError, IndexError) as e:
+                    logging.error(f"Object parsing error: {str(e)}")
+                    return text
+                
+        except Exception as e:
+            logging.error(f"Translation error for text '{text[:100]}...': {str(e)}")
+            return text  # 如果翻译失败，返回原文
 
 
 class AzureTranslator(BaseTranslator):
