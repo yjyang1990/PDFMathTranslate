@@ -29,7 +29,11 @@ def setup_log() -> None:
     import doclayout_yolo
 
     logging.basicConfig()
+    # 设置所有日志级别为 WARNING
+    logging.getLogger().setLevel(logging.WARNING)
     doclayout_yolo.utils.LOGGER.setLevel(logging.WARNING)
+    # 禁用 YOLO 的进度条
+    os.environ["YOLO_VERBOSE"] = "False"
 
 
 def check_files(files: List[str]) -> List[str]:
@@ -86,6 +90,7 @@ def extract_text(
     if not os.path.exists(pth):
         print('Downloading...')
         urllib.request.urlretrieve("https://hf-mirror.com/juliozhao/DocLayout-YOLO-DocStructBench/blob/main/doclayout_yolo_docstructbench_imgsz1024.pt",pth)
+    os.environ['YOLO_VERBOSE'] = 'False'
     model = doclayout_yolo.YOLOv10(pth)
 
     for file in files:

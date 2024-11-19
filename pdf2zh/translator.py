@@ -214,10 +214,10 @@ class OpenAITranslator(BaseTranslator):
             # 在发送请求前等待令牌
             self.rate_limiter.acquire()
             
-            response = self.client.chat.completions.create(
-                model=self.model,
-                **self.options,
-                messages=[
+            # 打印请求参数
+            request_params = {
+                "model": self.model,
+                "messages": [
                     {
                         "role": "system",
                         "content": "You are a professional,authentic machine translation engine.",
@@ -226,33 +226,22 @@ class OpenAITranslator(BaseTranslator):
                         "role": "user",
                         "content": f"Translate the following markdown source text to {self.lang_out}. Keep the formula notation $v*$ unchanged. Output translation directly without any additional text.\nSource Text: {text}\nTranslated Text:",
                     },
-                ],
-            )
+                ]
+            }
             
-            # 输出原始响应内容
-            logging.info(f"OpenAI API Response: {response}")
-            
-            # 处理不同的响应格式
-            if isinstance(response, str):
-                logging.info("Response is string type")
-                try:
-                    import json
-                    response_data = json.loads(response)
-                    result = response_data.get('choices', [{}])[0].get('message', {}).get('content', '').strip()
-                    logging.info(f"Parsed JSON result: {result}")
-                    return result
-                except (json.JSONDecodeError, KeyError, IndexError) as e:
-                    logging.error(f"JSON parsing error: {str(e)}")
-                    return response.strip() if response else text
-            else:
-                logging.info(f"Response type: {type(response)}")
-                try:
+            try:
+                response = self.client.chat.completions.create(**request_params)
+                if hasattr(response, 'choices') and response.choices:
                     result = response.choices[0].message.content.strip()
-                    logging.info(f"Object result: {result}")
+                    logging.info(f"Translation: {text} -> {result}")
                     return result
-                except (AttributeError, IndexError) as e:
-                    logging.error(f"Object parsing error: {str(e)}")
+                else:
+                    logging.error("No choices in response")
                     return text
+                    
+            except Exception as api_error:
+                logging.error(f"OpenAI API Error: {str(api_error)}")
+                return text
                 
         except Exception as e:
             logging.error(f"Translation error for text '{text[:100]}...': {str(e)}")
@@ -291,3 +280,125 @@ class AzureTranslator(BaseTranslator):
 
         translated_text = response[0].translations[0].text
         return translated_text
+
+def test_openai_translator():
+    # 配置日志
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(message)s',
+        handlers=[logging.StreamHandler()]
+    )
+
+    # 测试文本
+    test_texts = [
+        "This is a simple test.",
+        "The value of $v1$ is proportional to the square of $v2$.",
+        """In this paper, we propose a novel approach to machine learning.
+        The equation $E = mc^2$ represents the relationship between energy and mass."""
+    ]
+
+    # 创建翻译器实例
+    translator = OpenAITranslator(
+        service="openai",
+        lang_out="zh-CN",
+        lang_in="en",
+        model="gpt-4o-mini"  # 使用配置的模型
+    )
+
+    print("\n=== OpenAI Translator Test ===")
+    print(f"Base URL: {openai.base_url}")
+    print(f"Model: {translator.model}\n")
+
+    # 测试每个文本
+    for i, text in enumerate(test_texts, 1):
+        print(f"\nTest {i}:")
+        print(f"Input:  {text}")
+        result = translator.translate(text)
+        print(f"Output: {result}")
+        print("-" * 50)
+
+def test_concurrent_translation():
+    import concurrent.futures
+    import time
+    from datetime import datetime
+    
+    # 配置日志
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(message)s',
+        datefmt='%H:%M:%S'
+    )
+
+    # 生成大量测试文本
+    test_texts = [
+        f"Test {i}: This is a sample text with formula $E_{i} = mc^2$ and number {i}."
+        for i in range(20)  # 生成20个测试文本
+    ]
+    test_texts.extend([
+        "Complex formula: The integral $\int_{0}^{\infty} e^{-x^2} dx = \frac{\sqrt{\pi}}{2}$",
+        "Matrix notation: Let $A = \begin{pmatrix} a & b \\ c & d \end{pmatrix}$ be a matrix",
+        "Long text with multiple formulas: Consider $f(x) = ax^2 + bx + c$ where $a \neq 0$",
+    ])
+
+    # 创建翻译器实例
+    translator = OpenAITranslator(
+        service="openai",
+        lang_out="zh-CN",
+        lang_in="en",
+        model="gpt-4o-mini"
+    )
+
+    def translate_with_time(text):
+        start_time = time.time()
+        result = translator.translate(text)
+        end_time = time.time()
+        return {
+            'input': text,
+            'output': result,
+            'time': end_time - start_time
+        }
+
+    print("\n=== Concurrent OpenAI Translator Test ===")
+    print(f"Base URL: {openai.base_url}")
+    print(f"Model: {translator.model}")
+    print(f"Total tasks: {len(test_texts)}")
+    print("Starting concurrent translation...\n")
+
+    start_total = time.time()
+    results = []
+    
+    # 使用线程池并发执行翻译
+    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+        future_to_text = {executor.submit(translate_with_time, text): text for text in test_texts}
+        
+        # 收集结果
+        for future in concurrent.futures.as_completed(future_to_text):
+            try:
+                result = future.result()
+                results.append(result)
+                print(f"\nTask completed ({len(results)}/{len(test_texts)}):")
+                print(f"Input:  {result['input'][:50]}...")
+                print(f"Output: {result['output'][:50]}...")
+                print(f"Time:   {result['time']:.2f}s")
+            except Exception as e:
+                print(f"Task failed: {str(e)}")
+
+    end_total = time.time()
+    total_time = end_total - start_total
+
+    # 打印统计信息
+    print("\n=== Translation Statistics ===")
+    print(f"Total tasks completed: {len(results)}")
+    print(f"Total time: {total_time:.2f}s")
+    print(f"Average time per task: {total_time/len(results):.2f}s")
+    print(f"Success rate: {len(results)/len(test_texts)*100:.1f}%")
+
+def test_single():
+    test_openai_translator()
+
+if __name__ == "__main__":
+    import sys
+    if len(sys.argv) > 1 and sys.argv[1] == "--concurrent":
+        test_concurrent_translation()
+    else:
+        test_single()

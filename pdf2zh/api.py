@@ -10,7 +10,7 @@ import asyncio
 from concurrent.futures import ThreadPoolExecutor
 
 # 配置日志
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.WARNING)  # 修改默认日志级别为WARNING
 logger = logging.getLogger(__name__)
 
 app = FastAPI(
