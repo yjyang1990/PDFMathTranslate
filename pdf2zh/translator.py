@@ -204,7 +204,7 @@ class OpenAITranslator(BaseTranslator):
         self.client = openai.OpenAI()
         
         # 创建速率限制器，每分钟最多60个请求（每秒1个请求）
-        self.rate_limiter = RateLimiter(1.0)
+        self.rate_limiter = RateLimiter(10.0)
 
     def translate(self, text) -> str:
         if not text.strip():  # 如果文本为空，直接返回
