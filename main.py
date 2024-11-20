@@ -21,7 +21,7 @@ app = FastAPI(
 )
 
 # 挂载 PDF 翻译 API
-app.mount("/", pdf_app)
+app.mount("/api", pdf_app)
 
 if __name__ == "__main__":
     import uvicorn
