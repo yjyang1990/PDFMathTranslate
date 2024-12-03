@@ -126,12 +126,24 @@ class TaskStatus(str, Enum):
     CANCELED = "canceled"     # 已取消
 
 class TranslationRequest(BaseModel):
-    service: str
+    service: str = "DeepL"  # 默认使用DeepL
     apikey: Optional[str] = None
     model_id: Optional[str] = None
-    lang_from: str
-    lang_to: str
+    lang_from: str = "en"  # 默认从英语翻译
+    lang_to: str = "zh"    # 默认翻译到中文
     pages: Optional[List[int]] = None
+
+    class Config:
+        schema_extra = {
+            "example": {
+                "service": "DeepL",
+                "apikey": "your-api-key",
+                "model_id": None,
+                "lang_from": "en",
+                "lang_to": "zh",
+                "pages": [1, 2, 3]
+            }
+        }
 
 class TranslationStatus(BaseModel):
     task_id: str

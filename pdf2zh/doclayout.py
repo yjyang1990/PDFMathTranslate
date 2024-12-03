@@ -3,7 +3,7 @@ import cv2
 import numpy as np
 import ast
 import onnx
-import onnxruntime
+import onnxruntime as ort
 import os
 from huggingface_hub import hf_hub_download
 
