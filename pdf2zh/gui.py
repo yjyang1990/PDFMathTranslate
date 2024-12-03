@@ -12,12 +12,13 @@ import requests
 
 # Map service names to pdf2zh service options
 service_map = {
-    "Google": "google",
-    "DeepL": "deepl",
-    "DeepLX": "deeplx",
-    "Ollama": "ollama",
-    "OpenAI": "openai",
-    "Azure": "azure",
+    "Google": ("google", None, None),
+    "DeepL": ("deepl", "DEEPL_AUTH_KEY", None),
+    "DeepLX": ("deeplx", "DEEPLX_AUTH_KEY", None),
+    "Ollama": ("ollama", None, "gemma2"),
+    "OpenAI": ("openai", "OPENAI_API_KEY", "gpt-4o"),
+    "Azure": ("azure", "AZURE_APIKEY", None),
+    "Tencent": ("tencent", "TENCENT_SECRET_KEY", None),
 }
 lang_map = {
     "Chinese": "zh",
@@ -40,7 +41,7 @@ flag_demo = False
 if os.environ.get("PDF2ZH_DEMO"):
     flag_demo = True
     service_map = {
-        "Google": "google",
+        "Google": ("google", None, None),
     }
     page_map = {
         "First": [0],
@@ -89,8 +90,10 @@ def upload_file(file, service, progress=gr.Progress()):
 def translate(
     file_path,
     service,
+    apikey,
     model_id,
-    lang,
+    lang_from,
+    lang_to,
     page_range,
     recaptcha_response,
     progress=gr.Progress(),
@@ -112,10 +115,14 @@ def translate(
     file_dual = output / f"{filename}-dual.pdf"
     shutil.copyfile(file_path, file_en)
 
-    selected_service = service_map.get(service, "google")
-    selected_page = page_map.get(page_range, [0])
-    lang_to = lang_map.get(lang, "zh")
+    selected_service = service_map[service][0]
+    if service_map[service][1]:
+        os.environ.setdefault(service_map[service][1], apikey)
+    selected_page = page_map[page_range]
+    lang_from = lang_map[lang_from]
+    lang_to = lang_map[lang_to]
     if selected_service == "google":
+        lang_from = "zh-CN" if lang_from == "zh" else lang_from
         lang_to = "zh-CN" if lang_to == "zh" else lang_to
 
     print(f"Files before translation: {os.listdir(output)}")
@@ -126,7 +133,7 @@ def translate(
     param = {
         "files": [file_en],
         "pages": selected_page,
-        "lang_in": "auto",
+        "lang_in": lang_from,
         "lang_out": lang_to,
         "service": f"{selected_service}:{model_id}",
         "output": output,
@@ -276,68 +283,50 @@ with gr.Blocks(
 
             def details_wrapper(text_markdown):
                 text = f"""
-                <details>
                     <summary>Technical details</summary>
                     {text_markdown}
                     - Version: {__version__}
-                </details>"""
+                """
                 return text
 
             def env_var_checker(env_var_name: str) -> str:
-                if (
-                    not os.environ.get(env_var_name)
-                    or os.environ.get(env_var_name) == ""
-                ):
-                    envs_status = (
-                        f"<span class='env-warning'>- Warning: environmental not found or error ({env_var_name})."
-                        + "</span><br>- Please make sure that the environment variables are properly configured "
-                        + "(<a href='https://github.com/Byaidu/PDFMathTranslate'>guide</a>).<br>"
-                    )
-                else:
-                    value = str(os.environ.get(env_var_name))
-                    envs_status = (
-                        "<span class='env-success'>- Properly configured.</span><br>"
-                    )
-                    if len(value) < 13:
-                        envs_status += (
-                            f"- Env: <code>{os.environ.get(env_var_name)}</code><br>"
+                if env_var_name:
+                    if not os.environ.get(env_var_name):
+                        envs_status = (
+                            f"<span class='env-warning'>- Warning: environmental not found or error ({env_var_name})."
+                            + "</span><br>- Please make sure that the environment variables are properly configured "
+                            + "(<a href='https://github.com/Byaidu/PDFMathTranslate'>guide</a>).<br>"
                         )
                     else:
-                        envs_status += f"- Env: <code>{value[:13]}***</code><br>"
-                return details_wrapper(envs_status)
-
-            def on_select_service(value, evt: gr.EventData):
-                # hide model id by default
-                model_visibility = gr.update(visible=False)
-                # add a text description
-                if value == "Google":
-                    envs_status = details_wrapper(
-                        "<span class='env-success'>- Properly configured.</span><br>"
-                    )
-
-                elif value == "DeepL":
-                    envs_status = env_var_checker("DEEPL_AUTH_KEY")
-                elif value == "DeepLX":
-                    envs_status = env_var_checker("DEEPLX_AUTH_KEY")
-                elif value == "Azure":
-                    envs_status = env_var_checker("AZURE_APIKEY")
-                elif value == "OpenAI":
-                    model_visibility = gr.update(
-                        visible=True, value="gpt-4o"
-                    )  # show model id when service is selected
-                    envs_status = env_var_checker("OPENAI_API_KEY")
-                elif value == "Ollama":
-                    model_visibility = gr.update(
-                        visible=True, value="gemma2"
-                    )  # show model id when service is selected
-                    envs_status = env_var_checker("OLLAMA_HOST")
+                        value = str(os.environ.get(env_var_name))
+                        envs_status = "<span class='env-success'>- Properly configured.</span><br>"
+                        envs_status += (
+                            f"- {env_var_name}: <code>{value[:13]}***</code><br>"
+                        )
                 else:
                     envs_status = (
-                        "<span class='env-warning'>- Warning: model not in the list."
-                        "</span><br>- Please report via "
-                        "(<a href='https://github.com/Byaidu/PDFMathTranslate'>guide</a>).<br>"
+                        "<span class='env-success'>- Properly configured.</span><br>"
                     )
-                return envs_status, model_visibility
+                return details_wrapper(envs_status)
+
+            def on_select_service(service, evt: gr.EventData):
+                if service_map[service][1]:
+                    apikey_content = gr.update(
+                        visible=True, value=os.environ.get(service_map[service][1])
+                    )
+                else:
+                    apikey_content = gr.update(visible=False)
+                if service_map[service][2]:
+                    model_visibility = gr.update(
+                        visible=True, value=service_map[service][2]
+                    )
+                else:
+                    model_visibility = gr.update(visible=False)
+                return (
+                    env_var_checker(service_map[service][1]),
+                    model_visibility,
+                    apikey_content,
+                )
 
             output_title = gr.Markdown("## 翻译结果", visible=False)
             output_file = gr.File(label="下载翻译", visible=False)
@@ -353,7 +342,9 @@ with gr.Blocks(
                 details_wrapper(envs_status),
                 elem_classes=["secondary-text"],
             )
-            service.select(on_select_service, service, [tech_details_tog, model_id])
+            service.select(
+                on_select_service, service, [tech_details_tog, model_id, apikey]
+            )
 
         with gr.Column(scale=2):
             gr.Markdown("## 预览")
@@ -383,7 +374,16 @@ with gr.Blocks(
 
     translate_btn.click(
         translate,
-        inputs=[file_input, service, model_id, lang_to, page_range, recaptcha_response],
+        inputs=[
+            file_input,
+            service,
+            apikey,
+            model_id,
+            lang_from,
+            lang_to,
+            page_range,
+            recaptcha_response,
+        ],
         outputs=[
             output_file,
             preview,

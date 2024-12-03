@@ -1,6 +1,5 @@
 """Functions that can be used for the most common use-cases for pdf2zh.six"""
 
-import logging
 from typing import BinaryIO
 import numpy as np
 import tqdm
@@ -11,19 +10,6 @@ from pdfminer.pdfdocument import PDFDocument
 from pdfminer.pdfparser import PDFParser
 from pdf2zh.converter import TranslateConverter
 from pdf2zh.pdfinterp import PDFPageInterpreterEx
-
-
-def get_device():
-    """Get the device to use for computation."""
-    try:
-        import torch
-
-        if torch.cuda.is_available():
-            return "cuda:0"
-    except ImportError:
-        pass
-
-    return "cpu"
 
 
 def extract_text_to_fp(
@@ -43,9 +29,6 @@ def extract_text_to_fp(
     callback: object = None,
     **kwarg,
 ) -> None:
-    if debug:
-        logging.getLogger().setLevel(logging.DEBUG)
-
     rsrcmgr = PDFResourceManager()
     layout = {}
     device = TranslateConverter(
@@ -76,9 +59,7 @@ def extract_text_to_fp(
             image = np.fromstring(pix.samples, np.uint8).reshape(
                 pix.height, pix.width, 3
             )[:, :, ::-1]
-            page_layout = model.predict(
-                image, imgsz=int(pix.height / 32) * 32, device=get_device()
-            )[0]
+            page_layout = model.predict(image, imgsz=int(pix.height / 32) * 32)[0]
             # kdtree 是不可能 kdtree 的，不如直接渲染成图片，用空间换时间
             box = np.ones((pix.height, pix.width))
             h, w = box.shape

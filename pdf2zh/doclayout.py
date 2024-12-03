@@ -1,8 +1,9 @@
 import abc
 import cv2
 import numpy as np
-import contextlib
-import os
+import ast
+import onnx
+import onnxruntime
 from huggingface_hub import hf_hub_download
 
 # Set HuggingFace mirror
@@ -149,9 +150,6 @@ class YoloBox:
 
 class OnnxModel(DocLayoutModel):
     def __init__(self, model_path: str):
-        import ast
-        import onnxruntime as ort
-
         self.model_path = model_path
         self.session = ort.InferenceSession(model_path)
 

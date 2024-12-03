@@ -66,7 +66,7 @@ Note that the computing resources of the demo are limited, so please avoid abusi
 
 <h2 id="install">Installation and Usage</h2>
 
-We provide three methods for using this project: [Commandline](#cmd), [GUI](#gui), and [Docker](#docker).
+We provide three methods for using this project: [Commandline](#cmd), [Portable](#portable), [GUI](#gui), and [Docker](#docker).
 
 <h3 id="cmd">Method I. Commandline</h3>
 
@@ -83,7 +83,13 @@ We provide three methods for using this project: [Commandline](#cmd), [GUI](#gui
       pdf2zh document.pdf
       ```
 
-<h3 id="gui">Method II. GUI</h3>
+<h3 id="portable">Method II. Portable</h3>
+
+No need to pre-install Python environment
+
+Download and double-click to run [setup.bat](https://raw.githubusercontent.com/Byaidu/PDFMathTranslate/refs/heads/main/setup.bat)
+
+<h3 id="gui">Method III. GUI</h3>
 
 1. Python installed (3.8 <= version <= 3.12)
 2. Install our package:
@@ -108,7 +114,7 @@ We provide three methods for using this project: [Commandline](#cmd), [GUI](#gui
 
 See [documentation for GUI](./docs/README_GUI.md) for more details.
 
-<h3 id="docker">Method III. Docker</h3>
+<h3 id="docker">Method IV. Docker</h3>
 
 1. Pull and run:
 
@@ -273,15 +279,19 @@ pdf2zh example.pdf -t 1
 
 <h2 id="todo">TODO</h2>
 
-- [ ] Parse layout with [PaddleX](https://github.com/PaddlePaddle/PaddleX/blob/17cc27ac3842e7880ca4aad92358d3ef8555429a/paddlex/repo_apis/PaddleDetection_api/object_det/official_categories.py#L81), [PaperMage](https://github.com/allenai/papermage/blob/9cd4bb48cbedab45d0f7a455711438f1632abebe/README.md?plain=1#L102), [SAM2](https://github.com/facebookresearch/sam2)
+- [ ] Parse layout with DocLayNet based models, [PaddleX](https://github.com/PaddlePaddle/PaddleX/blob/17cc27ac3842e7880ca4aad92358d3ef8555429a/paddlex/repo_apis/PaddleDetection_api/object_det/official_categories.py#L81), [PaperMage](https://github.com/allenai/papermage/blob/9cd4bb48cbedab45d0f7a455711438f1632abebe/README.md?plain=1#L102), [SAM2](https://github.com/facebookresearch/sam2)
 
-- [ ] Fix page rotation, table of contents, format of list
+- [ ] Fix page rotation, table of contents, format of lists
 
-- [ ] Fix pixel formula in old paper
+- [ ] Fix pixel formula in old papers
 
 - [ ] Support multiple language with [Noto Font](https://fonts.google.com/noto), [Ubuntu Font](https://design.ubuntu.com/font)
 
-- [ ] Retry except KeyboardInterrupt
+- [ ] Async retry except KeyboardInterrupt
+
+- [ ] Knuth–Plass algorithm for western languages
+
+- [ ] Support non-PDF/A files
 
 <h2 id="acknowledgement">Acknowledgements</h2>
 
