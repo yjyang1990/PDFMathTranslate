@@ -2,36 +2,78 @@ import abc
 import cv2
 import numpy as np
 import contextlib
+import os
 from huggingface_hub import hf_hub_download
+
+# Set HuggingFace mirror
+os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
 
 
 class DocLayoutModel(abc.ABC):
     @staticmethod
     def load_torch():
-        model = TorchModel.from_pretrained(
-            repo_id="juliozhao/DocLayout-YOLO-DocStructBench",
-            filename="doclayout_yolo_docstructbench_imgsz1024.pt",
-        )
-        return model
+        try:
+            import doclayout_yolo
+            print("成功导入 doclayout_yolo")
+        except ImportError as e:
+            print(f"导入 doclayout_yolo 失败: {e}")
+            return None
+
+        # First try to load from local models directory
+        print('torch-----local_path')
+        local_path = os.path.join(os.path.dirname(__file__), "models", "doclayout_yolo_docstructbench_imgsz1024.pt")
+        print(local_path)
+        if os.path.exists(local_path):
+            try:
+                return TorchModel(local_path)
+            except Exception as e:
+                print(f"加载torch模型失败: {e}")
+                return None
+        
+        print(f"模型文件不存在: {local_path}")
+        return None
 
     @staticmethod
     def load_onnx():
-        model = OnnxModel.from_pretrained(
-            repo_id="wybxc/DocLayout-YOLO-DocStructBench-onnx",
-            filename="doclayout_yolo_docstructbench_imgsz1024.onnx",
-        )
-        return model
+        try:
+            import onnx
+            import onnxruntime
+            print("成功导入 onnx 和 onnxruntime")
+        except ImportError as e:
+            print(f"导入 onnx 相关包失败: {e}")
+            return None
+
+        print('onnx-----local_path')
+        local_path = os.path.join(os.path.dirname(__file__), "models", "doclayout_yolo_docstructbench_imgsz1024.onnx")
+        print(local_path)
+        if os.path.exists(local_path):
+            try:
+                return OnnxModel(local_path)
+            except Exception as e:
+                print(f"加载onnx模型失败: {e}")
+                return None
+        
+        print(f"模型文件不存在: {local_path}")
+        return None
 
     @staticmethod
     def load_available():
-        with contextlib.suppress(ImportError):
-            return DocLayoutModel.load_torch()
+        torch_model = DocLayoutModel.load_torch()
+        if torch_model is not None:
+            return torch_model
 
-        with contextlib.suppress(ImportError):
-            return DocLayoutModel.load_onnx()
+        onnx_model = DocLayoutModel.load_onnx()
+        if onnx_model is not None:
+            return onnx_model
 
         raise ImportError(
-            "Please install the `torch` or `onnx` feature to use the DocLayout model."
+            "无法加载模型。请确保：\n"
+            "1. 已安装必要的依赖：\n"
+            "   - torch模型需要: pip install doclayout-yolo torch\n"
+            "   - onnx模型需要: pip install onnx onnxruntime\n"
+            "2. 模型文件已正确放置：\n"
+            "   - torch模型路径：pdf2zh/models/doclayout_yolo_docstructbench_imgsz1024.pt\n"
+            "   - onnx模型路径：pdf2zh/models/doclayout_yolo_docstructbench_imgsz1024.onnx"
         )
 
     @property
@@ -67,8 +109,17 @@ class TorchModel(DocLayoutModel):
 
     @staticmethod
     def from_pretrained(repo_id: str, filename: str):
-        pth = hf_hub_download(repo_id=repo_id, filename=filename)
-        return TorchModel(pth)
+        # 直接从本地加载模型
+        local_path = os.path.join(os.path.dirname(__file__), "models", filename)
+        if not os.path.exists(local_path):
+            raise ImportError(
+                f"模型文件不存在: {local_path}\n"
+                "请下载模型文件并放置到正确位置。\n"
+                "下载链接：\n"
+                "1. Torch模型(推荐): https://huggingface.co/juliozhao/DocLayout-YOLO-DocStructBench/resolve/main/doclayout_yolo_docstructbench_imgsz1024.pt\n"
+                "2. ONNX模型: https://huggingface.co/wybxc/DocLayout-YOLO-DocStructBench-onnx/resolve/main/doclayout_yolo_docstructbench_imgsz1024.onnx"
+            )
+        return TorchModel(local_path)
 
     @property
     def stride(self):
@@ -99,29 +150,30 @@ class YoloBox:
 class OnnxModel(DocLayoutModel):
     def __init__(self, model_path: str):
         import ast
-
-        try:
-
-            import onnx
-            import onnxruntime
-        except ImportError:
-            raise ImportError(
-                "Please install the `onnx` feature to use the ONNX model."
-            )
+        import onnxruntime as ort
 
         self.model_path = model_path
+        self.session = ort.InferenceSession(model_path)
 
-        model = onnx.load(model_path)
-        metadata = {d.key: d.value for d in model.metadata_props}
-        self._stride = ast.literal_eval(metadata["stride"])
-        self._names = ast.literal_eval(metadata["names"])
-
-        self.model = onnxruntime.InferenceSession(model.SerializeToString())
+        # Load model config
+        with open(os.path.join(os.path.dirname(__file__), "models", "config.py")) as f:
+            config = ast.literal_eval(f.read())
+            self.names = config["names"]
+            self.stride = config["stride"]
 
     @staticmethod
     def from_pretrained(repo_id: str, filename: str):
-        pth = hf_hub_download(repo_id=repo_id, filename=filename)
-        return OnnxModel(pth)
+        # 直接从本地加载模型
+        local_path = os.path.join(os.path.dirname(__file__), "models", filename)
+        if not os.path.exists(local_path):
+            raise ImportError(
+                f"模型文件不存在: {local_path}\n"
+                "请下载模型文件并放置到正确位置。\n"
+                "下载链接：\n"
+                "1. Torch模型(推荐): https://huggingface.co/juliozhao/DocLayout-YOLO-DocStructBench/resolve/main/doclayout_yolo_docstructbench_imgsz1024.pt\n"
+                "2. ONNX模型: https://huggingface.co/wybxc/DocLayout-YOLO-DocStructBench-onnx/resolve/main/doclayout_yolo_docstructbench_imgsz1024.onnx"
+            )
+        return OnnxModel(local_path)
 
     @property
     def stride(self):
@@ -203,11 +255,11 @@ class OnnxModel(DocLayoutModel):
         new_h, new_w = pix.shape[2:]
 
         # Run inference
-        preds = self.model.run(None, {"images": pix})[0]
+        preds = self.session.run(None, {"images": pix})[0]
 
         # Postprocess predictions
         preds = preds[preds[..., 4] > 0.25]
         preds[..., :4] = self.scale_boxes(
             (new_h, new_w), preds[..., :4], (orig_h, orig_w)
         )
-        return [YoloResult(boxes=preds, names=self._names)]
+        return [YoloResult(boxes=preds, names=self.names)]

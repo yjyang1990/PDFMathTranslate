@@ -240,39 +240,37 @@ with gr.Blocks(
 
     with gr.Row():
         with gr.Column(scale=1):
-            gr.Markdown("## File | < 5 MB" if flag_demo else "## File")
+            gr.Markdown("## 文件" + (" | < 5 MB" if flag_demo else ""))
             file_input = gr.File(
-                label="Document",
+                label="文档",
                 file_count="single",
                 file_types=[".pdf"],
                 type="filepath",
                 elem_classes=["input-file"],
             )
-            gr.Markdown("## Option")
+            gr.Markdown("## 选项")
             service = gr.Dropdown(
-                label="Service",
-                info="Which translation service to use. Some require keys",
+                label="翻译服务",
+                info="选择要使用的翻译服务。部分服务需要密钥",
                 choices=service_map.keys(),
                 value="Google",
             )
             lang_to = gr.Dropdown(
-                label="Translate to",
-                info="Which language to translate to (optional)",
+                label="目标语言",
+                info="选择要翻译成的目标语言（可选）",
                 choices=lang_map.keys(),
                 value="Chinese",
             )
             page_range = gr.Radio(
                 choices=page_map.keys(),
-                label="Pages",
-                info="Translate the full document or just few pages (optional)",
+                label="页面范围",
+                info="翻译整个文档或仅翻译部分页面（可选）",
                 value=list(page_map.keys())[0],
             )
             model_id = gr.Textbox(
-                label="Model ID",
-                info="Please enter the identifier of the model you wish to use (e.g., gemma2). "
-                "This identifier will be used to specify the particular model for translation.",
-                # value="gemma2",
-                visible=False,  # hide by default
+                label="模型ID",
+                info="请输入要使用的模型标识符（例如：gemma2）。此标识符将用于指定特定的翻译模型。",
+                visible=False,
             )
             envs_status = "<span class='env-success'>- Properly configured.</span><br>"
 
@@ -281,8 +279,6 @@ with gr.Blocks(
                 <details>
                     <summary>Technical details</summary>
                     {text_markdown}
-                    - GitHub: <a href="https://github.com/Byaidu/PDFMathTranslate">Byaidu/PDFMathTranslate</a><br>
-                    - GUI by: <a href="https://github.com/reycn">Rongxin</a><br>
                     - Version: {__version__}
                 </details>"""
                 return text
@@ -343,16 +339,16 @@ with gr.Blocks(
                     )
                 return envs_status, model_visibility
 
-            output_title = gr.Markdown("## Translated", visible=False)
-            output_file = gr.File(label="Download Translation", visible=False)
+            output_title = gr.Markdown("## 翻译结果", visible=False)
+            output_file = gr.File(label="下载翻译", visible=False)
             output_file_dual = gr.File(
-                label="Download Translation (Dual)", visible=False
+                label="下载双语翻译", visible=False
             )
             recaptcha_response = gr.Textbox(
                 label="reCAPTCHA Response", elem_id="verify", visible=False
             )
             recaptcha_box = gr.HTML('<div id="recaptcha-box"></div>')
-            translate_btn = gr.Button("Translate", variant="primary")
+            translate_btn = gr.Button("开始翻译", variant="primary")
             tech_details_tog = gr.Markdown(
                 details_wrapper(envs_status),
                 elem_classes=["secondary-text"],
@@ -360,8 +356,8 @@ with gr.Blocks(
             service.select(on_select_service, service, [tech_details_tog, model_id])
 
         with gr.Column(scale=2):
-            gr.Markdown("## Preview")
-            preview = gr.Image(label="Document Preview", visible=True)
+            gr.Markdown("## 预览")
+            preview = gr.Image(label="文档预览", visible=True)
 
     # Event handlers
     file_input.upload(
