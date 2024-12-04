@@ -119,15 +119,12 @@ http://127.0.0.1:8080
    - 对于 Windows/Mac 用户，安装 [Docker Desktop](https://www.docker.com/products/docker-desktop/)
    - 对于 Linux 用户，按照 [Docker 安装指南](https://docs.docker.com/engine/install/) 进行安装
 
-2. 安装并启动 Redis：
-```bash
-docker run -d --name redis -p 6379:6379 redis
-```
+2. 确保远程 Redis 服务器已启动（103.73.163.68:6379）
 
 3. 拉取并运行 PDF 翻译服务：
 ```bash
 docker pull byaidu/pdf2zh
-docker run -d -p 8080:8080 --link redis:redis -e REDIS_CONFIG_HOST=redis byaidu/pdf2zh
+docker run -d -p 8080:8080 byaidu/pdf2zh
 ```
 
 4. 打开浏览器访问：
@@ -136,8 +133,12 @@ http://localhost:8080
 ```
 
 注意事项：
-- 确保 Redis 容器正在运行
+- 确保能够连接到远程 Redis 服务器（103.73.163.68:6379）
 - 如果需要修改端口，请相应地更改 `-p 8080:8080` 中的第一个 8080
+- 如果需要自定义配置，可以通过挂载自定义的 .env 文件：
+  ```bash
+  docker run -d -p 8080:8080 -v /path/to/your/.env:/app/.env byaidu/pdf2zh
+  ```
 - 如果遇到权限问题，可能需要在命令前添加 `sudo`
 
 用于在云服务上部署容器镜像：
