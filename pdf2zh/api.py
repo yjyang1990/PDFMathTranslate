@@ -126,21 +126,21 @@ class TaskStatus(str, Enum):
     CANCELED = "canceled"     # 已取消
 
 class TranslationRequest(BaseModel):
-    service: str = "DeepL"  # 默认使用DeepL
+    service: str = "Google"  # 默认使用DeepL
     apikey: Optional[str] = None
     model_id: Optional[str] = None
-    lang_from: str = "en"  # 默认从英语翻译
-    lang_to: str = "zh"    # 默认翻译到中文
+    lang_from: str = "English"  # 默认从英语翻译
+    lang_to: str = "Chinese"    # 默认翻译到中文
     pages: Optional[List[int]] = None
 
     class Config:
         schema_extra = {
             "example": {
-                "service": "DeepL",
+                "service": "Google",
                 "apikey": "your-api-key",
                 "model_id": None,
-                "lang_from": "en",
-                "lang_to": "zh",
+                "lang_from": "English",
+                "lang_to": "Chinese",
                 "pages": [1, 2, 3]
             }
         }
@@ -268,9 +268,21 @@ file_hash_mapping: Dict[str, str] = {}
 
 @app.post("/upload")
 async def upload_file(file: UploadFile):
-    """上传PDF文件"""
-    if not file.filename.endswith('.pdf'):
-        raise HTTPException(status_code=400, detail="Only PDF files are allowed")
+    """上传PDF文件，仅支持PDF格式的学术文献"""
+    # 检查文件类型
+    if not file.filename.lower().endswith('.pdf'):
+        raise HTTPException(
+            status_code=400, 
+            detail="Invalid file type. Only PDF academic papers are supported."
+        )
+    
+    # 检查文件内容类型
+    content_type = file.content_type
+    if content_type and content_type != 'application/pdf':
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid content type. Only PDF files are allowed."
+        )
     
     # 创建临时文件来计算MD5
     temp_file = Path("temp_upload.pdf")
