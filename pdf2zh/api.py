@@ -220,11 +220,13 @@ async def process_translation(task_id: str, input_file: Path, param: dict):
             raise Exception(f"Translation completed but output files not found. Expected: {output_file}, {output_file_dual}")
             
     except Exception as e:
-        print(f"Translation error: {str(e)}")
+        import traceback
+        error_msg = f"Translation error: {str(e)}\n{traceback.format_exc()}"
+        print(error_msg)
         status_data = get_task_status(task_id)
         status_data.update({
             "status": TaskStatus.FAILED,
-            "error": str(e),
+            "error": error_msg,
             "progress": 0,
             "message": "Translation failed"
         })

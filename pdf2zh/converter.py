@@ -174,7 +174,15 @@ class TranslateConverter(PDFConverterEx):
         vmax: float = ltpage.width / 4  # 行内公式最大宽度
         ops: str = ""                   # 渲染结果
 
+        def decode_font_name(font_name):    # 解码字体名称
+            if isinstance(font_name, bytes):
+                return font_name.decode('utf-8', errors='ignore')
+            return font_name
+
         def vflag(font: str, char: str):    # 匹配公式（和角标）字体
+            font = decode_font_name(font)
+            if isinstance(char, bytes):
+                char = char.decode('utf-8', errors='ignore')
             font = font.split("+")[-1]      # 字体名截断
             if re.match(r"\(cid:", char):
                 return True
@@ -268,7 +276,7 @@ class TranslateConverter(PDFConverterEx):
                         or vflag(pstk[-1].font.fontname, "")                # 3. 段落字体为公式字体
                         or re.match(                                        # 4. 段落字体为粗体
                             r"(.*Medi|.*Bold)",
-                            pstk[-1].font.fontname,
+                            decode_font_name(pstk[-1].font.fontname),
                             re.IGNORECASE,
                         )
                     ):
