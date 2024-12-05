@@ -449,7 +449,7 @@ class TranslateConverter(PDFConverterEx):
                 if brk and x + adv > x1 + 0.1 * size:  # 到达右边界且原文段落存在换行
                     x = x0
                     # 调整行间距，优化中文阅读体验
-                    lang_space = {"zh-CN": 1.65, "zh-TW": 1.65, "ja": 1.1, "ko": 1.2, "en": 1.2, "ar": 1.0, "ru": 0.8, "uk": 0.8, "ta": 0.8}
+                    lang_space = {"zh-CN": 1.85, "zh-TW": 1.85, "ja": 1.1, "ko": 1.2, "en": 1.2, "ar": 1.0, "ru": 0.8, "uk": 0.8, "ta": 0.8}
                     y -= size * lang_space.get(self.translator.lang_out, 1.1)  # 小语种大多适配 1.1
                 if vy_regex:  # 插入公式
                     fix = 0
