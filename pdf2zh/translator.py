@@ -3,9 +3,10 @@ import hmac
 import html
 import logging
 import os
-import re
-import time
 from datetime import timezone, datetime
+from dotenv import load_dotenv
+
+load_dotenv()  # 加载 .env 文件
 
 from json import dumps, loads
 import unicodedata
@@ -289,9 +290,7 @@ class OpenAITranslator(BaseTranslator):
         lang_in = "en" if lang_in == "auto" else lang_in
         super().__init__(service, lang_out, lang_in, model)
         self.options = {"temperature": 0}  # 随机采样可能会打断公式标记
-        # OPENAI_BASE_URL
-        # OPENAI_API_KEY
-        self.client = openai.OpenAI()
+        self.client = openai.OpenAI()  # 会自动从环境变量读取配置
 
     def translate(self, text) -> str:
         response = self.client.chat.completions.create(
