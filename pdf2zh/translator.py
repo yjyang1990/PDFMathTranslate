@@ -306,10 +306,15 @@ class OpenAITranslator(BaseTranslator):
         self.client = openai.OpenAI()
 
     def translate(self, text) -> str:
+        # 如果文本为空或只包含空白字符，直接返回原文本
         if not text or text.isspace():
             return text
             
         try:
+            # 如果文本为空，直接返回空字符串
+            if not text.strip():
+                return ""
+                
             response = self.client.chat.completions.create(
                 model=self.model,
                 **self.options,
@@ -325,6 +330,7 @@ class OpenAITranslator(BaseTranslator):
 2. Preserve markdown formatting including lists, headings, and emphasis
 3. Maintain the original structure and layout
 4. If any part cannot be confidently translated, keep it in the original language
+5. If the source text is empty or contains only whitespace, return the original text
 
 Source Text: {text}
 

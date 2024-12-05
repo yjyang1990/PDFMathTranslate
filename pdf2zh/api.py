@@ -126,9 +126,9 @@ class TaskStatus(str, Enum):
     CANCELED = "canceled"     # 已取消
 
 class TranslationRequest(BaseModel):
-    service: str = "Google"  # 默认使用DeepL
+    service: str = "OpenAI"  # 默认使用OpenAI
     apikey: Optional[str] = None
-    model_id: Optional[str] = None
+    model_id: Optional[str] = "gpt-4o-mini"  # 默认使用最新的GPT-4模型
     lang_from: str = "English"  # 默认从英语翻译
     lang_to: str = "Chinese"    # 默认翻译到中文
     pages: Optional[List[int]] = None
@@ -136,9 +136,9 @@ class TranslationRequest(BaseModel):
     class Config:
         schema_extra = {
             "example": {
-                "service": "Google",
+                "service": "OpenAI",
                 "apikey": "your-api-key",
-                "model_id": None,
+                "model_id": "gpt-4o-mini",
                 "lang_from": "English",
                 "lang_to": "Chinese",
                 "pages": [1, 2, 3]
