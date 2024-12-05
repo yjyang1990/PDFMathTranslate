@@ -290,6 +290,26 @@ class OpenAITranslator(BaseTranslator):
         lang_in = "en" if lang_in == "auto" else lang_in
         super().__init__(service, lang_out, lang_in, model)
         self.options = {"temperature": 0}  # 随机采样可能会打断公式标记
+        
+        # 打印环境变量信息
+        import os
+        print("\n=== 环境变量调试信息 ===")
+        print("当前工作目录:", os.getcwd())
+        print(".env 文件是否存在:", os.path.exists(os.path.join(os.getcwd(), '.env')))
+        
+        # 重新加载 .env 文件
+        from dotenv import load_dotenv
+        load_dotenv(override=True)  # 强制重新加载
+        
+        api_key = os.getenv("OPENAI_API_KEY")
+        base_url = os.getenv("OPENAI_BASE_URL")
+        print("\nOpenAI 配置信息:")
+        print(f"API Key 类型: {type(api_key)}")
+        print(f"API Key 值: {api_key[:8]}..." if api_key else "API Key: 未设置")
+        print(f"Base URL 类型: {type(base_url)}")
+        print(f"Base URL 值: {base_url}")
+        print("===================\n")
+        
         self.client = openai.OpenAI()  # 会自动从环境变量读取配置
 
     def translate(self, text) -> str:
