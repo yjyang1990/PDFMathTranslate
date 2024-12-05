@@ -424,22 +424,46 @@ class TranslateConverter(PDFConverterEx):
                 else:
                     log.exception(e, exc_info=False)
                 raise e
-        with concurrent.futures.ThreadPoolExecutor(
-            max_workers=self.thread
-        ) as executor:
-            news = list(executor.map(worker, sstk))
+
+        def process_translations(sstk):
+            """使用生成器处理翻译结果"""
+            with concurrent.futures.ThreadPoolExecutor(max_workers=self.thread) as executor:
+                yield from executor.map(worker, sstk)
 
         ############################################################
         # C. 新文档排版
         def raw_string(fcur: str, cstk: str):  # 编码字符串
             if fcur == 'noto':
-                return "".join(["%04x" % self.font_manager.has_glyph(self._noto_font, c) for c in cstk])
+                return "".join(f"{self.font_manager.has_glyph(self._noto_font, c):04x}" for c in cstk)
             elif isinstance(self.fontmap[fcur], PDFCIDFont):  # 判断编码长度
-                return "".join(["%04x" % ord(c) for c in cstk])
+                return "".join(f"{ord(c):04x}" for c in cstk)
             else:
-                return "".join(["%02x" % ord(c) for c in cstk])
+                return "".join(f"{ord(c):02x}" for c in cstk)
 
+        def process_formula(var_item, varl_item, varf_item, x, y, fcur):
+            """生成器函数：处理公式排版"""
+            fix = varf_item if fcur is not None else 0
+            # 排版公式字符
+            for vch in var_item:
+                vc = chr(vch.cid)
+                yield (f"/{self.fontid[vch.font]} {vch.size:f} Tf 1 0 0 1 "
+                      f"{x + vch.x0 - var_item[0].x0:f} {fix + y + vch.y0 - var_item[0].y0:f} "
+                      f"Tm [<{raw_string(self.fontid[vch.font], vc)}>] TJ ")
+                
+            # 排版公式线条
+            for l in varl_item:
+                if l.linewidth < 5:  # hack 有的文档会用粗线条当图片背景
+                    yield (f"ET q 1 0 0 1 {l.pts[0][0] + x - var_item[0].x0:f} "
+                          f"{l.pts[0][1] + fix + y - var_item[0].y0:f} cm [] 0 d 0 J "
+                          f"{l.linewidth:f} w 0 0 m {l.pts[1][0] - l.pts[0][0]:f} "
+                          f"{l.pts[1][1] - l.pts[0][1]:f} l S Q BT ")
+
+        # 使用生成器处理翻译
+        news = process_translations(sstk)
+        
         _x, _y = 0, 0
+        ops_parts = []  # 使用列表收集操作，最后一次性join
+        
         for id, new in enumerate(news):
             x: float = pstk[id].x           # 段落初始横坐标
             y: float = pstk[id].y           # 段落上边界
@@ -504,7 +528,7 @@ class TranslateConverter(PDFConverterEx):
                     or x + adv > x1 + 0.1 * size    # 3. 到达右边界（可能一整行都被符号化，这里需要考虑浮点误差）
                 ):
                     if cstk:
-                        ops += f"/{fcur} {size:f} Tf 1 0 0 1 {tx:f} {y:f} Tm [<{raw_string(fcur, cstk)}>] TJ "
+                        ops_parts.append(f"/{fcur} {size:f} Tf 1 0 0 1 {tx:f} {y:f} Tm [<{raw_string(fcur, cstk)}>] TJ ")
                         cstk = ""
                 if brk and x + adv > x1 + 0.1 * size:  # 到达右边界且原文段落存在换行
                     x = x0
@@ -528,19 +552,9 @@ class TranslateConverter(PDFConverterEx):
                     if ptr >= len(new) - 1:  # 如果是段落的最后一行
                         y -= size * 0.5  # 添加额外的段落间距
                 if vy_regex:  # 插入公式
-                    fix = 0
-                    if fcur is not None:  # 段落内公式修正纵向偏移
-                        fix = varf[vid]
-                    for vch in var[vid]:  # 排版公式字符
-                        vc = chr(vch.cid)
-                        ops += f"/{self.fontid[vch.font]} {vch.size:f} Tf 1 0 0 1 {x + vch.x0 - var[vid][0].x0:f} {fix + y + vch.y0 - var[vid][0].y0:f} Tm [<{raw_string(self.fontid[vch.font], vc)}>] TJ "
-                        if log.isEnabledFor(logging.DEBUG):
-                            lstk.append(LTLine(0.1, (_x, _y), (x + vch.x0 - var[vid][0].x0, fix + y + vch.y0 - var[vid][0].y0)))
-                            _x, _y = x + vch.x0 - var[vid][0].x0, fix + y + vch.y0 - var[vid][0].y0
-                    for l in varl[vid]:  # 排版公式线条
-                        if l.linewidth < 5:  # hack 有的文档会用粗线条当图片背景
-                            ops += f"ET q 1 0 0 1 {l.pts[0][0] + x - var[vid][0].x0:f} {l.pts[0][1] + fix + y - var[vid][0].y0:f} cm [] 0 d 0 J {l.linewidth:f} w 0 0 m {l.pts[1][0] - l.pts[0][0]:f} {l.pts[1][1] - l.pts[0][1]:f} l S Q BT "
-                else:  # 插入文字缓冲区
+                    ops_parts.extend(process_formula(var[vid], varl[vid], varf[vid], x, y, fcur))
+                else:
+                    # 插入文字缓冲区
                     if not cstk:  # 单行开头
                         tx = x
                         if x == x0 and ch == " ":  # 消除段落换行空格
@@ -557,9 +571,13 @@ class TranslateConverter(PDFConverterEx):
                     _x, _y = x, y
             # 处理结尾
             if cstk:
-                ops += f"/{fcur} {size:f} Tf 1 0 0 1 {tx:f} {y:f} Tm [<{raw_string(fcur, cstk)}>] TJ "
+                ops_parts.append(f"/{fcur} {size:f} Tf 1 0 0 1 {tx:f} {y:f} Tm [<{raw_string(fcur, cstk)}>] TJ ")
+
+        # 处理全局线条
         for l in lstk:  # 排版全局线条
             if l.linewidth < 5:  # hack 有的文档会用粗线条当图片背景
-                ops += f"ET q 1 0 0 1 {l.pts[0][0]:f} {l.pts[0][1]:f} cm [] 0 d 0 J {l.linewidth:f} w 0 0 m {l.pts[1][0] - l.pts[0][0]:f} {l.pts[1][1] - l.pts[0][1]:f} l S Q BT "
-        ops = f"BT {ops}ET "
+                ops_parts.append(f"ET q 1 0 0 1 {l.pts[0][0]:f} {l.pts[0][1]:f} cm [] 0 d 0 J {l.linewidth:f} w 0 0 m {l.pts[1][0] - l.pts[0][0]:f} {l.pts[1][1] - l.pts[0][1]:f} l S Q BT ")
+        
+        # 一次性拼接所有操作
+        ops = f"BT {''.join(ops_parts)}ET "
         return ops
