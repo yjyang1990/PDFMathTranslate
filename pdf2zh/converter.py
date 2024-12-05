@@ -359,8 +359,8 @@ class TranslateConverter(PDFConverterEx):
                 hash_key_paragraph = cache.deterministic_hash(
                     (s, str(self.translator))
                 )
-                # new = cache.load_paragraph(hash_key, hash_key_paragraph)  # 查询缓存
-                new = None
+                new = cache.load_paragraph(hash_key, hash_key_paragraph)  # 查询缓存
+                # new = None
                 if new is None:
                     new = self.translator.translate(s)
                     cache.write_paragraph(hash_key, hash_key_paragraph, new)
