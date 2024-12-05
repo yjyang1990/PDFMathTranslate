@@ -31,6 +31,43 @@ from pymupdf import Font
 log = logging.getLogger(__name__)
 
 
+class FontManager:
+    """字体管理器，用于缓存和管理字体"""
+    def __init__(self):
+        self._font_cache = {}  # 字体缓存
+        self._char_width_cache = {}  # 字符宽度缓存
+        self._glyph_cache = {}  # 字形缓存
+
+    def get_font(self, font_path):
+        """获取字体，如果缓存中没有则加载"""
+        if font_path not in self._font_cache:
+            self._font_cache[font_path] = Font(font_path)
+        return self._font_cache[font_path]
+
+    def get_char_width(self, font, char, size):
+        """获取字符宽度，使用缓存"""
+        cache_key = (id(font), char, size)
+        if cache_key not in self._char_width_cache:
+            if isinstance(font, Font):
+                width = font.char_lengths(char, size)[0]
+            else:
+                width = font.char_width(ord(char)) * size
+            self._char_width_cache[cache_key] = width
+        return self._char_width_cache[cache_key]
+
+    def has_glyph(self, font, char):
+        """检查字体是否包含字形，使用缓存"""
+        cache_key = (id(font), char)
+        if cache_key not in self._glyph_cache:
+            self._glyph_cache[cache_key] = font.has_glyph(ord(char))
+        return self._glyph_cache[cache_key]
+
+    def clear_cache(self):
+        """清理缓存"""
+        self._char_width_cache.clear()
+        self._glyph_cache.clear()
+
+
 class PDFConverterEx(PDFConverter):
     def __init__(
         self,
@@ -137,6 +174,12 @@ class TranslateConverter(PDFConverterEx):
         self.layout = layout
         self.resfont = resfont or self.SERIF_FONT  # 如果没有指定字体，使用思源宋体
         self.noto = noto
+        self.font_manager = FontManager()  # 初始化字体管理器
+        # 预加载常用字体
+        if self.resfont:
+            self.font_manager.get_font(self.resfont)
+        if noto:
+            self._noto_font = noto
         self.translator: BaseTranslator = None
         param = service.split(":", 1)
         if param[0] == "google":
@@ -379,7 +422,7 @@ class TranslateConverter(PDFConverterEx):
         # C. 新文档排版
         def raw_string(fcur: str, cstk: str):  # 编码字符串
             if fcur == 'noto':
-                return "".join(["%04x" % self.noto.has_glyph(ord(c)) for c in cstk])
+                return "".join(["%04x" % self.font_manager.has_glyph(self._noto_font, c) for c in cstk])
             elif isinstance(self.fontmap[fcur], PDFCIDFont):  # 判断编码长度
                 return "".join(["%04x" % ord(c) for c in cstk])
             else:
@@ -440,9 +483,9 @@ class TranslateConverter(PDFConverterEx):
                         fcur_ = self.resfont  # 默认非拉丁字体
                     # print(self.fontid[font],fcur_,ch,font.char_width(ord(ch)))
                     if fcur_ == 'noto':
-                        adv = self.noto.char_lengths(ch, size)[0]
+                        adv = self.font_manager.get_char_width(self._noto_font, ch, size)
                     else:
-                        adv = self.fontmap[fcur_].char_width(ord(ch)) * size
+                        adv = self.font_manager.get_char_width(self.fontmap[fcur_], ch, size)
                     ptr += 1
                 if (                                # 输出文字缓冲区
                     fcur_ != fcur                   # 1. 字体更新
