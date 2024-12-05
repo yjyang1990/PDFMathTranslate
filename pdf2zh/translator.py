@@ -48,7 +48,7 @@ class GoogleTranslator(BaseTranslator):
         }
 
     def translate(self, text):
-        if not text or not text.strip() or text.strip() == '$v0$' or len(text.strip()) <= 1:
+        if not text or not text.strip() or text.strip() == '$v0$':
             return ""
         text = text[:5000]  # google translate max length
         response = self.session.get(
@@ -91,7 +91,7 @@ class TencentTranslator(BaseTranslator):
         self.base_link = f"{server_url}"
 
     def translate(self, text):
-        if not text or not text.strip() or text.strip() == '$v0$' or len(text.strip()) <= 1:
+        if not text or not text.strip() or text.strip() == '$v0$':
             return ""
         text = text[:5000]
         data = {
@@ -215,7 +215,7 @@ class DeepLXTranslator(BaseTranslator):
         }
 
     def translate(self, text):
-        if not text or not text.strip() or text.strip() == '$v0$' or len(text.strip()) <= 1:
+        if not text or not text.strip() or text.strip() == '$v0$':
             return ""
         text = text[:5000]  # google translate max length
         response = self.session.post(
@@ -257,7 +257,7 @@ class DeepLTranslator(BaseTranslator):
         self.client = deepl.Translator(auth_key, server_url=server_url)
 
     def translate(self, text):
-        if not text or not text.strip() or text.strip() == '$v0$' or len(text.strip()) <= 1:
+        if not text or not text.strip() or text.strip() == '$v0$':
             return ""
         response = self.client.translate_text(
             text, target_lang=self.lang_out, source_lang=self.lang_in
@@ -275,7 +275,7 @@ class OllamaTranslator(BaseTranslator):
         self.client = ollama.Client()
 
     def translate(self, text):
-        if not text or not text.strip() or text.strip() == '$v0$' or len(text.strip()) <= 1:
+        if not text or not text.strip() or text.strip() == '$v0$':
             return ""
         response = self.client.chat(
             model=self.model,
@@ -306,8 +306,8 @@ class OpenAITranslator(BaseTranslator):
         self.client = openai.OpenAI()
 
     def translate(self, text) -> str:
-        # 统一处理空白文本和特殊情况
-        if not text or len(text.strip()) <= 1 or text.strip() == '$v0$':
+        # 统一处理空白文本和单字符的情况
+        if not text or not text.strip() or text.strip() == '$v0$':
             return text
             
         try:
@@ -324,9 +324,10 @@ class OpenAITranslator(BaseTranslator):
                         "content": f"""Please translate the following text from {self.lang_in} to {self.lang_out}. Follow these requirements:
 1. Keep all mathematical formulas (e.g. $v*$, $$equation$$) unchanged
 2. Preserve markdown formatting including lists, headings, and emphasis
-3. Maintain the original structure and layout
+3. Maintain the original structure and layout, including all line breaks
 4. If any part cannot be confidently translated, keep it in the original language
 5. If the source text is empty or contains only whitespace, return the original text
+6. IMPORTANT: Each line in the output must correspond to the same line in the input
 
 Source Text: {text}
 
@@ -366,8 +367,8 @@ class AzureTranslator(BaseTranslator):
         logger.setLevel(logging.WARNING)
 
     def translate(self, text) -> str:
-        # 统一处理空白文本和特殊情况
-        if not text or len(text.strip()) <= 1 or text.strip() == '$v0$':
+        # 统一处理空白文本和单字符的情况
+        if not text or not text.strip() or text.strip() == '$v0$':
             return text
             
         response = self.client.translate(

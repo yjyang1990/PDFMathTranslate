@@ -136,6 +136,14 @@ def extract_text(
 
         doc_en = pymupdf.open(file)
         page_count = doc_en.page_count
+        
+        # 如果没有指定页面范围，默认处理所有页面
+        if pages is None:
+            pages = list(range(page_count))  # 从0开始到page_count-1
+            print(f"No pages specified, processing all {page_count} pages")
+        else:
+            print(f"Processing specific pages: {pages}")
+            
         # font_list = [("china-ss", None), ("tiro", None)]
         font_id = {}
         for page in doc_en:
@@ -162,17 +170,9 @@ def extract_text(
         doc_en.save(Path(output) / f"{filename}-en.pdf")
 
         with open(Path(output) / f"{filename}-en.pdf", "rb") as fp:
-            # 如果指定了页面范围，只处理指定的页面
-            if pages:
-                print(f"Processing specific pages: {pages}")
-                local_vars = locals()
-                local_vars.pop('pages')  # Remove pages from locals to avoid duplicate argument
-                obj_patch: dict = extract_text_to_fp(fp, pages=pages, model=model, **local_vars)
-            else:
-                print("Processing all pages")
-                local_vars = locals()
-                local_vars.pop('pages')  # Remove pages from locals to avoid duplicate argument
-                obj_patch: dict = extract_text_to_fp(fp, model=model, **local_vars)
+            local_vars = locals()
+            local_vars.pop('pages')  # Remove pages from locals to avoid duplicate argument
+            obj_patch: dict = extract_text_to_fp(fp, pages=pages, model=model, **local_vars)
 
         for obj_id, ops_new in obj_patch.items():
             # ops_old=doc_en.xref_stream(obj_id)
