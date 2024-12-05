@@ -9,16 +9,97 @@ import numpy as np
 import pymupdf
 import tqdm
 import requests
+import cgi
 
 # Map service names to pdf2zh service options
 service_map = {
     "Google": ("google", None, None),
-    "DeepL": ("deepl", "DEEPL_AUTH_KEY", None),
-    "DeepLX": ("deeplx", "DEEPLX_AUTH_KEY", None),
-    "Ollama": ("ollama", None, "gemma2"),
-    "OpenAI": ("openai", "OPENAI_API_KEY", "gpt-4o"),
-    "Azure": ("azure", "AZURE_APIKEY", None),
-    "Tencent": ("tencent", "TENCENT_SECRET_KEY", None),
+    "DeepL": ("deepl", "DEEPL_SERVER_URL", "DEEPL_AUTH_KEY"),
+    "DeepLX": ("deeplx", "DEEPLX_SERVER_URL", "DEEPLX_AUTH_KEY"),
+    "Ollama": ("ollama", None, None),
+    "OpenAI": ("openai", "OPENAI_API_KEY", None),
+    "Azure": ("azure", "AZURE_APIKEY", "AZURE_ENDPOINT", "AZURE_REGION"),
+    "Tencent": ("tencent", "TENCENT_SECRET_KEY", "TENCENT_SECRET_ID"),
+}
+service_config = {
+    "google": {
+        "apikey_content": {"visible": False},
+        "apikey2_visibility": {"visible": False},
+        "model_visibility": {"visible": False},
+        "apikey3_visibility": {"visible": False},
+    },
+    "deepl": {
+        "apikey_content": lambda s: {
+            "visible": True,
+            "value": os.environ.get(s[1]),
+            "label": s[1],
+        },
+        "apikey2_visibility": lambda s: {
+            "visible": True,
+            "value": os.environ.get(s[2]),
+            "label": s[2],
+        },
+        "model_visibility": {"visible": False},
+        "apikey3_visibility": {"visible": False},
+    },
+    "deeplx": {
+        "apikey_content": lambda s: {
+            "visible": True,
+            "value": os.environ.get(s[1]),
+            "label": s[1],
+        },
+        "apikey2_visibility": lambda s: {
+            "visible": True,
+            "value": os.environ.get(s[2]),
+            "label": s[2],
+        },
+        "model_visibility": {"visible": False},
+        "apikey3_visibility": {"visible": False},
+    },
+    "ollama": {
+        "apikey_content": {"visible": False},
+        "apikey2_visibility": {"visible": False},
+        "model_visibility": lambda s: {"visible": True, "value": s[1]},
+        "apikey3_visibility": {"visible": False},
+    },
+    "openai": {
+        "apikey_content": lambda s: {
+            "visible": True,
+            "value": os.environ.get(s[1]),
+            "label": s[1],
+        },
+        "apikey2_visibility": {"visible": False},
+        "model_visibility": {"visible": True, "value": "gpt-4o"},
+        "apikey3_visibility": {"visible": False},
+    },
+    "azure": {
+        "apikey_content": lambda s: {
+            "visible": True,
+            "value": os.environ.get(s[1]),
+            "label": s[1],
+        },
+        "apikey2_visibility": lambda s: {
+            "visible": True,
+            "value": os.environ.get(s[2]),
+            "label": s[2],
+        },
+        "model_visibility": {"visible": False},
+        "apikey3_visibility": lambda s: {
+            "visible": True,
+            "value": os.environ.get(s[3]),
+            "label": s[3],
+        },
+    },
+    "tencent": {
+        "apikey_content": lambda s: {
+            "visible": True,
+            "value": os.environ.get(s[1]),
+            "label": s[1],
+        },
+        "apikey2_visibility": lambda s: {"visible": True, "value": "", "label": s[2]},
+        "model_visibility": {"visible": False},
+        "apikey3_visibility": {"visible": False},
+    },
 }
 lang_map = {
     "Chinese": "zh",
@@ -87,10 +168,34 @@ def upload_file(file, service, progress=gr.Progress()):
         return None, None
 
 
+def download_with_limit(url, save_path, size_limit):
+    chunk_size = 1024
+    total_size = 0
+    with requests.get(url, stream=True, timeout=10) as response:
+        response.raise_for_status()
+        content = response.headers.get("Content-Disposition")
+        try:
+            _, params = cgi.parse_header(content)
+            filename = params["filename"]
+        except Exception:
+            filename = os.path.basename(url)
+        with open(save_path / filename, "wb") as file:
+            for chunk in response.iter_content(chunk_size=chunk_size):
+                total_size += len(chunk)
+                if size_limit and total_size > size_limit:
+                    raise gr.Error("Exceeds file size limit")
+                file.write(chunk)
+    return save_path / filename
+
+
 def translate(
-    file_path,
+    file_type,
+    file_input,
+    link_input,
     service,
     apikey,
+    apikey2,
+    apikey3,
     model_id,
     lang_from,
     lang_to,
@@ -99,9 +204,6 @@ def translate(
     progress=gr.Progress(),
 ):
     """Translate PDF content using selected service."""
-    if not file_path:
-        raise gr.Error("No input")
-
     if flag_demo and not verify_recaptcha(recaptcha_response):
         raise gr.Error("reCAPTCHA fail")
 
@@ -109,21 +211,60 @@ def translate(
 
     output = Path("pdf2zh_files")
     output.mkdir(parents=True, exist_ok=True)
+
+    if file_type == "File":
+        if not file_input:
+            raise gr.Error("No input")
+        file_path = shutil.copy(file_input, output)
+    else:
+        if not link_input:
+            raise gr.Error("No input")
+        file_path = download_with_limit(
+            link_input,
+            output,
+            5 * 1024 * 1024 if flag_demo else None,
+        )
+
     filename = os.path.splitext(os.path.basename(file_path))[0]
     file_en = output / f"{filename}.pdf"
     file_zh = output / f"{filename}-zh.pdf"
     file_dual = output / f"{filename}-dual.pdf"
-    shutil.copyfile(file_path, file_en)
 
     selected_service = service_map[service][0]
-    if service_map[service][1]:
-        os.environ.setdefault(service_map[service][1], apikey)
     selected_page = page_map[page_range]
     lang_from = lang_map[lang_from]
     lang_to = lang_map[lang_to]
+
     if selected_service == "google":
         lang_from = "zh-CN" if lang_from == "zh" else lang_from
         lang_to = "zh-CN" if lang_to == "zh" else lang_to
+    elif selected_service == "deepl":
+        if service_map[service][1]:
+            os.environ.setdefault(service_map[service][1], apikey)
+        if service_map[service][2]:
+            os.environ.setdefault(service_map[service][2], apikey2)
+    elif selected_service == "deeplx":
+        if service_map[service][1]:
+            os.environ.setdefault(service_map[service][1], apikey)
+        if service_map[service][2]:
+            os.environ.setdefault(service_map[service][2], apikey2)
+    elif selected_service == "openai":
+        if service_map[service][1]:
+            os.environ.setdefault(service_map[service][1], apikey)
+    elif selected_service == "azure":
+        if service_map[service][1]:
+            os.environ.setdefault(service_map[service][1], apikey)
+        if service_map[service][2]:
+            os.environ.setdefault(service_map[service][2], apikey2)
+        if service_map[service][3]:
+            os.environ.setdefault(service_map[service][3], apikey3)
+    elif selected_service == "tencent":
+        if service_map[service][1]:
+            os.environ.setdefault(service_map[service][1], apikey)
+        if service_map[service][2]:
+            os.environ.setdefault(service_map[service][2], apikey2)
+    else:
+        raise gr.Error("Strange Service")
 
     print(f"Files before translation: {os.listdir(output)}")
 
@@ -248,12 +389,22 @@ with gr.Blocks(
     with gr.Row():
         with gr.Column(scale=1):
             gr.Markdown("## File | < 5 MB" if flag_demo else "## File")
+            file_type = gr.Radio(
+                choices=["File", "Link"],
+                label="Type",
+                value="File",
+            )
             file_input = gr.File(
-                label="Document",
+                label="File",
                 file_count="single",
                 file_types=[".pdf"],
                 type="filepath",
                 elem_classes=["input-file"],
+            )
+            link_input = gr.Textbox(
+                label="Link",
+                visible=False,
+                interactive=True,
             )
             gr.Markdown("## Option")
             with gr.Row():
@@ -286,6 +437,17 @@ with gr.Blocks(
             model_id = gr.Textbox(
                 label="Model ID",
                 visible=False,
+                interactive=True,
+            )
+            apikey2 = gr.Textbox(
+                label="API Key 2",
+                max_lines=1,
+                visible=False,
+            )
+            apikey3 = gr.Textbox(
+                label="API Key 3",
+                max_lines=1,
+                visible=False,
             )
             envs_status = "<span class='env-success'>- Properly configured.</span><br>"
 
@@ -300,42 +462,75 @@ with gr.Blocks(
                 return text
 
             def env_var_checker(env_var_name: str) -> str:
-                if env_var_name:
-                    if not os.environ.get(env_var_name):
-                        envs_status = (
-                            f"<span class='env-warning'>- Warning: environmental not found or error ({env_var_name})."
-                            + "</span><br>- Please make sure that the environment variables are properly configured "
-                            + "(<a href='https://github.com/Byaidu/PDFMathTranslate'>guide</a>).<br>"
-                        )
-                    else:
-                        value = str(os.environ.get(env_var_name))
-                        envs_status = "<span class='env-success'>- Properly configured.</span><br>"
-                        envs_status += (
-                            f"- {env_var_name}: <code>{value[:13]}***</code><br>"
-                        )
-                else:
+                envvarflag = True
+                envs_status = ""
+                for envvar in env_var_name[1:]:
+                    if envvar:
+                        if not os.environ.get(envvar):
+                            envs_status += f"<span class='env-warning'>- Warning: environmental not found or error ({envvar}).</span><br>"
+                            envvarflag = False
+                        else:
+                            value = str(os.environ.get(envvar))
+                            envs_status += (
+                                f"- {envvar}: <code>{value[:13]}***</code><br>"
+                            )
+
+                if envvarflag:
                     envs_status = (
                         "<span class='env-success'>- Properly configured.</span><br>"
                     )
+                else:
+                    envs_status += "- Please make sure that the environment variables are properly configured "
+                    envs_status += "(<a href='https://github.com/Byaidu/PDFMathTranslate'>guide</a>).<br>"
                 return details_wrapper(envs_status)
 
             def on_select_service(service, evt: gr.EventData):
-                if service_map[service][1]:
+                service_type = service_map[service][0]
+
+                if service_type in service_config:
+                    config = service_config[service_type]
                     apikey_content = gr.update(
-                        visible=True, value=os.environ.get(service_map[service][1])
+                        **(
+                            config["apikey_content"](service_map[service])
+                            if callable(config["apikey_content"])
+                            else config["apikey_content"]
+                        )
                     )
-                else:
-                    apikey_content = gr.update(visible=False)
-                if service_map[service][2]:
+                    apikey2_visibility = gr.update(
+                        **(
+                            config["apikey2_visibility"](service_map[service])
+                            if callable(config["apikey2_visibility"])
+                            else config["apikey2_visibility"]
+                        )
+                    )
                     model_visibility = gr.update(
-                        visible=True, value=service_map[service][2]
+                        **(
+                            config["model_visibility"](service_map[service])
+                            if callable(config["model_visibility"])
+                            else config["model_visibility"]
+                        )
+                    )
+                    apikey3_visibility = gr.update(
+                        **(
+                            config["apikey3_visibility"](service_map[service])
+                            if callable(config["apikey3_visibility"])
+                            else config["apikey3_visibility"]
+                        )
                     )
                 else:
-                    model_visibility = gr.update(visible=False)
+                    raise gr.Error("Strange Service")
                 return (
-                    env_var_checker(service_map[service][1]),
+                    env_var_checker(service_map[service]),
                     model_visibility,
                     apikey_content,
+                    apikey2_visibility,
+                    apikey3_visibility,
+                )
+
+            def on_select_filetype(file_type):
+                return (
+                    gr.update(visible=file_type == "File"),
+                    gr.update(visible=file_type == "Link"),
                 )
 
             output_title = gr.Markdown("## Translated", visible=False)
@@ -353,7 +548,29 @@ with gr.Blocks(
                 elem_classes=["secondary-text"],
             )
             service.select(
-                on_select_service, service, [tech_details_tog, model_id, apikey]
+                on_select_service,
+                service,
+                [tech_details_tog, model_id, apikey, apikey2, apikey3],
+            )
+            file_type.select(
+                on_select_filetype,
+                file_type,
+                [file_input, link_input],
+                js=(
+                    f"""
+                    (a,b)=>{{
+                        try{{
+                            grecaptcha.render('recaptcha-box',{{
+                                'sitekey':'{client_key}',
+                                'callback':'onVerify'
+                            }});
+                        }}catch(error){{}}
+                        return [a];
+                    }}
+                    """
+                    if flag_demo
+                    else ""
+                ),
             )
 
         with gr.Column(scale=2):
@@ -385,9 +602,13 @@ with gr.Blocks(
     translate_btn.click(
         translate,
         inputs=[
+            file_type,
             file_input,
+            link_input,
             service,
             apikey,
+            apikey2,
+            apikey3,
             model_id,
             lang_from,
             lang_to,
