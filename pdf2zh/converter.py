@@ -391,8 +391,8 @@ class TranslateConverter(PDFConverterEx):
             y: float = pstk[id].y           # 段落上边界
             x0: float = pstk[id].x0         # 段落左边界
             x1: float = pstk[id].x1         # 段落右边界
-            size: float = pstk[id].size     # 段落字体大小
-            font: PDFFont = pstk[id].font   # 段落字体
+            size: float = pstk[id].size     # 字体大小
+            font: PDFFont = pstk[id].font   # 字体
             brk: bool = pstk[id].brk        # 段落属性
             cstk: str = ""                  # 当前文字栈
             fcur: str = None                # 当前字体ID
@@ -449,7 +449,7 @@ class TranslateConverter(PDFConverterEx):
                 if brk and x + adv > x1 + 0.1 * size:  # 到达右边界且原文段落存在换行
                     x = x0
                     # 调整行间距，优化中文阅读体验
-                    lang_space = {"zh-CN": 1.55, "zh-TW": 1.55, "ja": 1.1, "ko": 1.2, "en": 1.2, "ar": 1.0, "ru": 0.8, "uk": 0.8, "ta": 0.8}
+                    lang_space = {"zh-CN": 1.65, "zh-TW": 1.65, "ja": 1.1, "ko": 1.2, "en": 1.2, "ar": 1.0, "ru": 0.8, "uk": 0.8, "ta": 0.8}
                     y -= size * lang_space.get(self.translator.lang_out, 1.1)  # 小语种大多适配 1.1
                 if vy_regex:  # 插入公式
                     fix = 0
