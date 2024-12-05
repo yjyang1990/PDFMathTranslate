@@ -9,6 +9,7 @@ import argparse
 import os
 import sys
 import logging
+import hashlib
 from pathlib import Path
 from typing import Any, Container, Iterable, List, Optional
 import urllib.request
@@ -100,10 +101,13 @@ def extract_text(
                     if not os.path.exists("./pdf2zh_files"):
                         print("Making a temporary dir for downloading PDF files...")
                         os.mkdir(os.path.dirname("./pdf2zh_files"))
-                    with open("./pdf2zh_files/tmp_download.pdf", "wb") as f:
+                    # Generate unique filename using URL hash
+                    url_hash = hashlib.md5(file.encode()).hexdigest()[:8]
+                    filename = f"./pdf2zh_files/download_{url_hash}.pdf"
+                    with open(filename, "wb") as f:
                         print(f"Writing the file: {file}...")
                         f.write(r.content)
-                    file = "./pdf2zh_files/tmp_download.pdf"
+                    file = filename
                 else:
                     r.raise_for_status()
             except Exception as e:
@@ -122,13 +126,8 @@ def extract_text(
             font_list.append((resfont, None))
         elif lang_out in noto_list:  # noto
             resfont = "noto"
-            ttf_path = os.path.join(tempfile.gettempdir(), "GoNotoKurrent-Regular.ttf")
-            if not os.path.exists(ttf_path):
-                print("Downloading Noto font...")
-                urllib.request.urlretrieve(
-                    "https://github.com/satbyy/go-noto-universal/releases/download/v7.0/GoNotoKurrent-Regular.ttf",
-                    ttf_path,
-                )
+            # 使用项目内的字体文件
+            ttf_path = os.path.join(os.path.dirname(__file__), "fonts", "GoNotoKurrent-Regular.ttf")
             font_list.append(("noto", ttf_path))
             noto = pymupdf.Font("noto", ttf_path)
         else:  # auto
