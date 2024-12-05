@@ -111,6 +111,9 @@ def extract_text(
                     f"Errors occur in downloading the PDF file. Please check the link(s).\nError:\n{e}"
                 )
         filename = os.path.splitext(os.path.basename(file))[0]
+        # 移除可能存在的 -zh 或 -en 后缀
+        if filename.endswith('-zh') or filename.endswith('-en'):
+            filename = filename[:-3]
 
         font_list = [("tiro", None)]
         noto = None

@@ -186,6 +186,16 @@ async def process_translation(task_id: str, input_file: Path, param: dict):
         status_data["status"] = TaskStatus.PROCESSING
         save_task_status(task_id, status_data)
         
+        # 确保使用原始文件
+        original_filename = input_file.name
+        if original_filename.endswith('-zh.pdf') or original_filename.endswith('-en.pdf'):
+            # 在同一目录下查找原始文件
+            base_filename = original_filename[:-7]  # 移除 '-zh.pdf' 或 '-en.pdf'
+            original_file = input_file.parent / f"{base_filename}.pdf"
+            if original_file.exists():
+                input_file = original_file
+                print(f"Using original file: {input_file}")
+        
         # 确保文件路径是字符串类型
         param["files"] = [str(input_file)]  # 转换为字符串
         
@@ -201,6 +211,9 @@ async def process_translation(task_id: str, input_file: Path, param: dict):
         
         # 更新输出文件路径
         filename = input_file.stem
+        # 移除可能存在的 -zh 或 -en 后缀
+        if filename.endswith('-zh') or filename.endswith('-en'):
+            filename = filename[:-3]
         output_file = task_dir / f"{filename}-zh.pdf"
         output_file_dual = task_dir / f"{filename}-dual.pdf"
         
