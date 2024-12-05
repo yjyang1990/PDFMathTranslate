@@ -429,7 +429,7 @@ async def translate_pdf(
     # 准备翻译参数
     param = {
         "files": [input_file],
-        "pages": request.pages,
+        "pages": [p-1 for p in request.pages] if request.pages else None,  # 转换页码从1开始到从0开始
         "lang_in": lang_from,
         "lang_out": lang_to,
         "service": f"{selected_service}:{request.model_id}" if request.model_id else selected_service,
@@ -534,11 +534,16 @@ async def download_file(task_id: str, dual: bool = False):
             raise HTTPException(status_code=404, detail=f"Translated file not found: {file_path}")
         
         print(f"Returning file: {file_path}")
-        return FileResponse(
+        response = FileResponse(
             path=str(file_path),
             filename=file_path.name,
             media_type="application/pdf"
         )
+        # 添加禁止缓存的响应头
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+        return response
         
     except Exception as e:
         print(f"Error in download_file: {str(e)}")

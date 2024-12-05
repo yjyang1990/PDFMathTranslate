@@ -191,8 +191,9 @@ class TranslateConverter(PDFConverterEx):
                 if re.match(self.vfont, font):
                     return True
             else:
-                if re.match(                                            # latex 字体
-                    r"(CM[^R]|(MS|XY|MT|BL|RM|EU|LA|RS)[A-Z]|LINE|TeX-|rsfs|txsy|wasy|stmary|.*Mono|.*Code|.*Ital|.*Sym|.*Math)",
+                # 只匹配明确的数学和符号字体，不包括普通斜体和拉丁文
+                if re.match(
+                    r"(CM[^R]|(MS|XY|MT|BL|RM|EU|RS)[A-Z]|LINE|TeX-|rsfs|txsy|wasy|stmary|.*Math|.*Sym)",
                     font,
                 ):
                     return True
@@ -206,7 +207,7 @@ class TranslateConverter(PDFConverterEx):
                     and char != " "                                     # 非空格
                     and (
                         unicodedata.category(char[0])
-                        in ["Lm", "Mn", "Sk", "Sm", "Zl", "Zp", "Zs"]   # 文字修饰符、数学符号、分隔符号
+                        in ["Mn", "Sm"]                                 # 只匹配数学符号和修饰符
                         or ord(char[0]) in range(0x370, 0x400)          # 希腊字母
                     )
                 ):
@@ -226,11 +227,29 @@ class TranslateConverter(PDFConverterEx):
                 cls = layout[cy, cx]
                 if (                                                                                        # 判定当前字符是否属于公式
                     cls == 0                                                                                # 1. 类别为保留区域
-                    or (cls == xt_cls and len(sstk[-1].strip()) > 1 and child.size < pstk[-1].size * 0.79)  # 2. 角标字体，有 0.76 的角标和 0.799 的大写，这里用 0.79 取中，同时考虑首字母放大的情况
-                    or vflag(child.fontname, child.get_text())                                              # 3. 公式字体
-                    or (child.matrix[0] == 0 and child.matrix[3] == 0)                                      # 4. 垂直字体
+                    or (cls == xt_cls and len(sstk[-1].strip()) > 1 and child.size < pstk[-1].size * 0.79)  # 2. 角标字体
+                    or (child.matrix[0] == 0 and child.matrix[3] == 0)                                      # 3. 垂直字体
                 ):
                     cur_v = True
+                else:
+                    # 打印调试信息
+                    text = child.get_text()
+                    
+                    # 检查是否是需要翻译的拉丁文
+                    is_latin_quote = False
+                    if sstk:
+                        current_text = sstk[-1]
+                        # 检查是否在引号内
+                        quote_count = current_text.count('"')
+                        in_quotes = quote_count % 2 == 1
+                        # 检查是否包含拉丁字母
+                        has_latin = any(c.isalpha() and ord(c) < 128 for c in text)
+                        is_latin_quote = in_quotes and has_latin
+                    
+                    if is_latin_quote or not vflag(child.fontname, text):
+                        cur_v = False
+                    else:
+                        cur_v = True
                 # 判定括号组是否属于公式
                 if not cur_v:
                     if vstk and child.get_text() == "(":

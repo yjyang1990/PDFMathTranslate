@@ -160,7 +160,17 @@ def extract_text(
         doc_en.save(Path(output) / f"{filename}-en.pdf")
 
         with open(Path(output) / f"{filename}-en.pdf", "rb") as fp:
-            obj_patch: dict = extract_text_to_fp(fp, model=model, **locals())
+            # 如果指定了页面范围，只处理指定的页面
+            if pages:
+                print(f"Processing specific pages: {pages}")
+                local_vars = locals()
+                local_vars.pop('pages')  # Remove pages from locals to avoid duplicate argument
+                obj_patch: dict = extract_text_to_fp(fp, pages=pages, model=model, **local_vars)
+            else:
+                print("Processing all pages")
+                local_vars = locals()
+                local_vars.pop('pages')  # Remove pages from locals to avoid duplicate argument
+                obj_patch: dict = extract_text_to_fp(fp, model=model, **local_vars)
 
         for obj_id, ops_new in obj_patch.items():
             # ops_old=doc_en.xref_stream(obj_id)
