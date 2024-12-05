@@ -114,6 +114,9 @@ class Paragraph:
 
 # fmt: off
 class TranslateConverter(PDFConverterEx):
+    SERIF_FONT = "pdf2zh/fonts/SourceHanSerifCN-Regular.otf"  # 思源宋体
+    SANS_FONT = "pdf2zh/fonts/SourceHanSansCN-Regular.otf"    # 思源黑体
+
     def __init__(
         self,
         rsrcmgr,
@@ -124,7 +127,7 @@ class TranslateConverter(PDFConverterEx):
         lang_in: str = "",
         lang_out: str = "",
         service: str = "",
-        resfont: str = "SimSun",  # 默认中文字体为宋体
+        resfont: str = None,  # 默认使用思源宋体
         noto: Font = None,
     ) -> None:
         super().__init__(rsrcmgr)
@@ -132,7 +135,7 @@ class TranslateConverter(PDFConverterEx):
         self.vchar = vchar
         self.thread = thread
         self.layout = layout
-        self.resfont = resfont
+        self.resfont = resfont or self.SERIF_FONT  # 如果没有指定字体，使用思源宋体
         self.noto = noto
         self.translator: BaseTranslator = None
         param = service.split(":", 1)
