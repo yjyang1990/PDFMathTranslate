@@ -48,6 +48,8 @@ class GoogleTranslator(BaseTranslator):
         }
 
     def translate(self, text):
+        if not text or text.isspace():
+            return text
         text = text[:5000]  # google translate max length
         response = self.session.get(
             self.base_link,
@@ -89,6 +91,8 @@ class TencentTranslator(BaseTranslator):
         self.base_link = f"{server_url}"
 
     def translate(self, text):
+        if not text or text.isspace():
+            return text
         text = text[:5000]
         data = {
             "SourceText": text,
@@ -211,6 +215,8 @@ class DeepLXTranslator(BaseTranslator):
         }
 
     def translate(self, text):
+        if not text or text.isspace():
+            return text
         text = text[:5000]  # google translate max length
         response = self.session.post(
             self.base_link,
@@ -251,6 +257,8 @@ class DeepLTranslator(BaseTranslator):
         self.client = deepl.Translator(auth_key, server_url=server_url)
 
     def translate(self, text):
+        if not text or text.isspace():
+            return text
         response = self.client.translate_text(
             text, target_lang=self.lang_out, source_lang=self.lang_in
         )
@@ -267,6 +275,8 @@ class OllamaTranslator(BaseTranslator):
         self.client = ollama.Client()
 
     def translate(self, text):
+        if not text or text.isspace():
+            return text
         response = self.client.chat(
             model=self.model,
             options=self.options,
@@ -296,21 +306,36 @@ class OpenAITranslator(BaseTranslator):
         self.client = openai.OpenAI()
 
     def translate(self, text) -> str:
-        response = self.client.chat.completions.create(
-            model=self.model,
-            **self.options,
-            messages=[
-                {
-                    "role": "system",
-                    "content": "You are a professional,authentic machine translation engine.",
-                },
-                {
-                    "role": "user",
-                    "content": f"Translate the following markdown source text to {self.lang_out}. Keep the formula notation $v*$ unchanged. Output translation directly without any additional text.\nSource Text: {text}\nTranslated Text:",  # noqa: E501
-                },
-            ],
-        )
-        return response.choices[0].message.content.strip()
+        if not text or text.isspace():
+            return text
+            
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model,
+                **self.options,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": """You are a professional translation engine specialized in academic and technical content.""",
+                    },
+                    {
+                        "role": "user",
+                        "content": f"""Please translate the following text from {self.lang_in} to {self.lang_out}. Follow these requirements:
+1. Keep all mathematical formulas (e.g. $v*$, $$equation$$) unchanged
+2. Preserve markdown formatting including lists, headings, and emphasis
+3. Maintain the original structure and layout
+4. If any part cannot be confidently translated, keep it in the original language
+
+Source Text: {text}
+
+Translated Text:""",
+                    },
+                ],
+            )
+            return response.choices[0].message.content.strip()
+        except Exception as e:
+            # If any error occurs (including rate limit), return original text
+            return text
 
 
 class AzureTranslator(BaseTranslator):
@@ -339,6 +364,8 @@ class AzureTranslator(BaseTranslator):
         logger.setLevel(logging.WARNING)
 
     def translate(self, text) -> str:
+        if not text or text.isspace():
+            return text
         response = self.client.translate(
             body=[text],
             from_language=self.lang_in,
