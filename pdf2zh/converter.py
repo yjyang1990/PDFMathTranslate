@@ -124,7 +124,7 @@ class TranslateConverter(PDFConverterEx):
         lang_in: str = "",
         lang_out: str = "",
         service: str = "",
-        resfont: str = "",
+        resfont: str = "SimSun",  # 默认中文字体为宋体
         noto: Font = None,
     ) -> None:
         super().__init__(rsrcmgr)
@@ -426,6 +426,8 @@ class TranslateConverter(PDFConverterEx):
                     except Exception:
                         pass
                     if fcur_ is None:
+                        if self.translator.lang_out in ["zh-CN", "zh-TW"]:
+                            size = size * 1.08  # 中文字体增大8%以提高清晰度
                         fcur_ = self.resfont  # 默认非拉丁字体
                     # print(self.fontid[font],fcur_,ch,font.char_width(ord(ch)))
                     if fcur_ == 'noto':
@@ -443,7 +445,8 @@ class TranslateConverter(PDFConverterEx):
                         cstk = ""
                 if brk and x + adv > x1 + 0.1 * size:  # 到达右边界且原文段落存在换行
                     x = x0
-                    lang_space = {"zh-CN": 1.4, "zh-TW": 1.4, "ja": 1.1, "ko": 1.2, "en": 1.2, "ar": 1.0, "ru": 0.8, "uk": 0.8, "ta": 0.8}
+                    # 调整行间距，优化中文阅读体验
+                    lang_space = {"zh-CN": 1.55, "zh-TW": 1.55, "ja": 1.1, "ko": 1.2, "en": 1.2, "ar": 1.0, "ru": 0.8, "uk": 0.8, "ta": 0.8}
                     y -= size * lang_space.get(self.translator.lang_out, 1.1)  # 小语种大多适配 1.1
                 if vy_regex:  # 插入公式
                     fix = 0
