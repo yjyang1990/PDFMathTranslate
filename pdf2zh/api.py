@@ -353,22 +353,22 @@ async def translate_pdf(
 ):
     """开始PDF翻译任务"""
     # 检查任务是否已存在且正在进行中
-    current_status = get_task_status(task_id)
-    if current_status:
-        if current_status["status"] == TaskStatus.PROCESSING:
-            return {
-                "task_id": task_id,
-                "status": TaskStatus.PROCESSING,
-                "message": "Translation task is already running"
-            }
-        elif current_status["status"] == TaskStatus.COMPLETED:
-            return {
-                "task_id": task_id,
-                "status": TaskStatus.COMPLETED,
-                "message": "Translation task is already completed",
-                "output_file": current_status.get("output_file"),
-                "output_file_dual": current_status.get("output_file_dual")
-            }
+    # current_status = get_task_status(task_id)
+    # if current_status:
+    #     if current_status["status"] == TaskStatus.PROCESSING:
+    #         return {
+    #             "task_id": task_id,
+    #             "status": TaskStatus.PROCESSING,
+    #             "message": "Translation task is already running"
+    #         }
+    #     elif current_status["status"] == TaskStatus.COMPLETED:
+    #         return {
+    #             "task_id": task_id,
+    #             "status": TaskStatus.COMPLETED,
+    #             "message": "Translation task is already completed",
+    #             "output_file": current_status.get("output_file"),
+    #             "output_file_dual": current_status.get("output_file_dual")
+    #         }
     
     output_dir = Path("pdf2zh_files") / task_id
     if not output_dir.exists():
