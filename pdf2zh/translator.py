@@ -48,8 +48,8 @@ class GoogleTranslator(BaseTranslator):
         }
 
     def translate(self, text):
-        if not text or text.isspace():
-            return text
+        if not text or not text.strip() or text.strip() == '$v0$' or len(text.strip()) <= 1:
+            return ""
         text = text[:5000]  # google translate max length
         response = self.session.get(
             self.base_link,
@@ -91,8 +91,8 @@ class TencentTranslator(BaseTranslator):
         self.base_link = f"{server_url}"
 
     def translate(self, text):
-        if not text or text.isspace():
-            return text
+        if not text or not text.strip() or text.strip() == '$v0$' or len(text.strip()) <= 1:
+            return ""
         text = text[:5000]
         data = {
             "SourceText": text,
@@ -215,8 +215,8 @@ class DeepLXTranslator(BaseTranslator):
         }
 
     def translate(self, text):
-        if not text or text.isspace():
-            return text
+        if not text or not text.strip() or text.strip() == '$v0$' or len(text.strip()) <= 1:
+            return ""
         text = text[:5000]  # google translate max length
         response = self.session.post(
             self.base_link,
@@ -257,8 +257,8 @@ class DeepLTranslator(BaseTranslator):
         self.client = deepl.Translator(auth_key, server_url=server_url)
 
     def translate(self, text):
-        if not text or text.isspace():
-            return text
+        if not text or not text.strip() or text.strip() == '$v0$' or len(text.strip()) <= 1:
+            return ""
         response = self.client.translate_text(
             text, target_lang=self.lang_out, source_lang=self.lang_in
         )
@@ -275,8 +275,8 @@ class OllamaTranslator(BaseTranslator):
         self.client = ollama.Client()
 
     def translate(self, text):
-        if not text or text.isspace():
-            return text
+        if not text or not text.strip() or text.strip() == '$v0$' or len(text.strip()) <= 1:
+            return ""
         response = self.client.chat(
             model=self.model,
             options=self.options,
@@ -306,15 +306,11 @@ class OpenAITranslator(BaseTranslator):
         self.client = openai.OpenAI()
 
     def translate(self, text) -> str:
-        # 如果文本为空或只包含空白字符，直接返回原文本
-        if not text or text.isspace():
+        # 统一处理空白文本和特殊情况
+        if not text or len(text.strip()) <= 1 or text.strip() == '$v0$':
             return text
             
         try:
-            # 如果文本为空，直接返回空字符串
-            if not text.strip():
-                return ""
-                
             response = self.client.chat.completions.create(
                 model=self.model,
                 **self.options,
@@ -370,8 +366,10 @@ class AzureTranslator(BaseTranslator):
         logger.setLevel(logging.WARNING)
 
     def translate(self, text) -> str:
-        if not text or text.isspace():
+        # 统一处理空白文本和特殊情况
+        if not text or len(text.strip()) <= 1 or text.strip() == '$v0$':
             return text
+            
         response = self.client.translate(
             body=[text],
             from_language=self.lang_in,
