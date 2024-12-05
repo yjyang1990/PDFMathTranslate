@@ -237,7 +237,6 @@ class TranslateConverter(PDFConverterEx):
                 else:
                     # 打印调试信息
                     text = child.get_text()
-                    
                     # 检查是否是需要翻译的拉丁文
                     is_latin_quote = False
                     if sstk:
@@ -431,7 +430,13 @@ class TranslateConverter(PDFConverterEx):
                         pass
                     if fcur_ is None:
                         if self.translator.lang_out in ["zh-CN", "zh-TW"]:
-                            size = size * 1.08  # 中文字体增大8%以提高清晰度
+                            # 调整中文字体大小，提高清晰度和可读性
+                            size = size * 1.12 if size < 12 else size * 1.08
+                            # 处理中文标点符号间距
+                            if ch in '，。；：！？、':
+                                adv = adv * 0.8  # 减小中文标点符号间距
+                            elif ch in '"\'"':  # 修复引号语法
+                                adv = adv * 0.9  # 调整引号间距
                         fcur_ = self.resfont  # 默认非拉丁字体
                     # print(self.fontid[font],fcur_,ch,font.char_width(ord(ch)))
                     if fcur_ == 'noto':
@@ -449,9 +454,25 @@ class TranslateConverter(PDFConverterEx):
                         cstk = ""
                 if brk and x + adv > x1 + 0.1 * size:  # 到达右边界且原文段落存在换行
                     x = x0
-                    # 调整行间距，优化中文阅读体验
-                    lang_space = {"zh-CN": 1.65, "zh-TW": 1.65, "ja": 1.1, "ko": 1.2, "en": 1.2, "ar": 1.0, "ru": 0.8, "uk": 0.8, "ta": 0.8}
-                    y -= size * lang_space.get(self.translator.lang_out, 1.1)  # 小语种大多适配 1.1
+                    # 优化不同语言的行间距和段落间距
+                    lang_space = {
+                        "zh-CN": 1.75,  # 增加中文行间距
+                        "zh-TW": 1.75,
+                        "ja": 1.5,
+                        "ko": 1.5,
+                        "en": 1.3,
+                        "ar": 1.2,
+                        "ru": 1.2,
+                        "uk": 1.2,
+                        "ta": 1.2
+                    }
+                    # 根据语言调整行间距，确保中文阅读体验
+                    line_spacing = lang_space.get(self.translator.lang_out, 1.3)
+                    y -= size * line_spacing
+                    
+                    # 在段落之间添加额外间距
+                    if ptr >= len(new) - 1:  # 如果是段落的最后一行
+                        y -= size * 0.5  # 添加额外的段落间距
                 if vy_regex:  # 插入公式
                     fix = 0
                     if fcur is not None:  # 段落内公式修正纵向偏移
