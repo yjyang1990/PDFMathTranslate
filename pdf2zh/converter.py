@@ -216,7 +216,7 @@ class TranslateConverter(PDFConverterEx):
         # 全局
         lstk = []                       # 全局线条栈
         xt: LTChar = None               # 上一个字符
-        xt_cls: int = -1                # 上一个字符所属段落
+        xt_cls: int = -1                # 上一个字符所属段落，保证无论第一个字符属于哪个类别都可以触发新段落
         vmax: float = ltpage.width / 4  # 行内公式最大宽度
         ops: str = ""                   # 渲染结果
 
@@ -286,16 +286,17 @@ class TranslateConverter(PDFConverterEx):
             # 读取当前字符在 layout 中的类别
             cx, cy = np.clip(int(child.x0), 0, w - 1), np.clip(int(child.y0), 0, h - 1)
             cls = layout[cy, cx]
-            if (                                                                                        # 判定当前字符是否属于公式
+            
+            # 判定当前字符是否属于公式
+            if (
                 cls == 0                                                                                # 1. 类别为保留区域
                 or (cls == xt_cls and len(sstk[-1].strip()) > 1 and child.size < pstk[-1].size * 0.79)  # 2. 角标字体
                 or (child.matrix[0] == 0 and child.matrix[3] == 0)                                      # 3. 垂直字体
             ):
                 cur_v = True
             else:
-                # 打印调试信息
-                text = child.get_text()
                 # 检查是否是需要翻译的拉丁文
+                text = child.get_text()
                 is_latin_quote = False
                 if sstk:
                     current_text = sstk[-1]
