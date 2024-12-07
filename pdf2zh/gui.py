@@ -3,6 +3,19 @@ import shutil
 from pathlib import Path
 from pdf2zh import __version__
 from pdf2zh.pdf2zh import extract_text
+from pdf2zh.translator import (
+    BaseTranslator,
+    GoogleTranslator,
+    BingTranslator,
+    DeepLTranslator,
+    DeepLXTranslator,
+    OllamaTranslator,
+    OpenAITranslator,
+    ZhipuTranslator,
+    SiliconTranslator,
+    AzureTranslator,
+    TencentTranslator,
+)
 
 import gradio as gr
 import numpy as np
@@ -11,108 +24,17 @@ import tqdm
 import requests
 import cgi
 
-# Map service names to pdf2zh service options
-# five value, padding with None
-service_map = {
-    "Google": (None, None, None),
-    "DeepL": ("DEEPL_SERVER_URL", "DEEPL_AUTH_KEY", None),
-    "DeepLX": ("DEEPLX_SERVER_URL", "DEEPLX_AUTH_KEY", None),
-    "Ollama": ("OLLAMA_HOST", None, None),
-    "OpenAI": ("OPENAI_BASE_URL", None, "OPENAI_API_KEY"),
-    "Azure": ("AZURE_APIKEY", "AZURE_ENDPOINT", "AZURE_REGION"),
-    "Tencent": ("TENCENT_SECRET_KEY", "TENCENT_SECRET_ID", None),
-}
-service_config = {
-    "Google": {
-        "apikey_content": {"visible": False},
-        "apikey2_visibility": {"visible": False},
-        "model_visibility": {"visible": False},
-        "apikey3_visibility": {"visible": False},
-    },
-    "DeepL": {
-        "apikey_content": lambda s: {
-            "visible": True,
-            "value": os.environ.get(s[0]),
-            "label": s[0],
-        },
-        "apikey2_visibility": lambda s: {
-            "visible": True,
-            "value": os.environ.get(s[1]),
-            "label": s[1],
-        },
-        "model_visibility": {"visible": False},
-        "apikey3_visibility": {"visible": False},
-    },
-    "DeepLX": {
-        "apikey_content": lambda s: {
-            "visible": True,
-            "value": os.environ.get(s[0]),
-            "label": s[0],
-        },
-        "apikey2_visibility": lambda s: {
-            "visible": True,
-            "value": os.environ.get(s[1]),
-            "label": s[1],
-        },
-        "model_visibility": {"visible": False},
-        "apikey3_visibility": {"visible": False},
-    },
-    "Ollama": {
-        "apikey_content": lambda s: {
-            "visible": True,
-            "value": os.environ.get(s[0]),
-            "label": s[0],
-        },
-        "apikey2_visibility": {"visible": False},
-        "model_visibility": lambda s: {"visible": True, "value": s[1]},
-        "apikey3_visibility": {"visible": False},
-    },
-    "OpenAI": {
-        "apikey_content": lambda s: {
-            "visible": True,
-            "value": os.environ.get(s[2]),
-            "label": s[2],
-        },
-        "apikey2_visibility": lambda s: {
-            "visible": True,
-            "value": os.environ.get(s[0]),
-            "label": s[0],
-        },
-        "model_visibility": {"visible": True, "value": "gpt-4o"},
-        "apikey3_visibility": {"visible": False},
-    },
-    "Azure": {
-        "apikey_content": lambda s: {
-            "visible": True,
-            "value": os.environ.get(s[0]),
-            "label": s[0],
-        },
-        "apikey2_visibility": lambda s: {
-            "visible": True,
-            "value": os.environ.get(s[1]),
-            "label": s[1],
-        },
-        "model_visibility": {"visible": False},
-        "apikey3_visibility": lambda s: {
-            "visible": True,
-            "value": os.environ.get(s[2]),
-            "label": s[2],
-        },
-    },
-    "Tencent": {
-        "apikey_content": lambda s: {
-            "visible": True,
-            "value": os.environ.get(s[0]),
-            "label": s[0],
-        },
-        "apikey2_visibility": lambda s: {
-            "visible": True,
-            "value": os.environ.get(s[1]),
-            "label": s[1],
-        },
-        "model_visibility": {"visible": False},
-        "apikey3_visibility": {"visible": False},
-    },
+service_map: dict[str, BaseTranslator] = {
+    "Google": GoogleTranslator,
+    "Bing": BingTranslator,
+    "DeepL": DeepLTranslator,
+    "DeepLX": DeepLXTranslator,
+    "Ollama": OllamaTranslator,
+    "OpenAI": OpenAITranslator,
+    "Zhipu": ZhipuTranslator,
+    "Silicon": SiliconTranslator,
+    "Azure": AzureTranslator,
+    "Tencent": TencentTranslator,
 }
 lang_map = {
     "Chinese": "zh",
@@ -132,29 +54,25 @@ page_map = {
 }
 
 flag_demo = False
-if os.environ.get("PDF2ZH_DEMO"):
+if os.getenv("PDF2ZH_DEMO"):
     flag_demo = True
     service_map = {
-        "Google": ("google", None, None),
+        "Google": GoogleTranslator,
     }
     page_map = {
         "First": [0],
         "First 20 pages": list(range(0, 20)),
     }
-    client_key = os.environ.get("PDF2ZH_CLIENT_KEY")
-    server_key = os.environ.get("PDF2ZH_SERVER_KEY")
+    client_key = os.getenv("PDF2ZH_CLIENT_KEY")
+    server_key = os.getenv("PDF2ZH_SERVER_KEY")
 
 
 def verify_recaptcha(response):
     recaptcha_url = "https://www.google.com/recaptcha/api/siteverify"
-
     print("reCAPTCHA", server_key, response)
-
     data = {"secret": server_key, "response": response}
     result = requests.post(recaptcha_url, data=data).json()
-
     print("reCAPTCHA", result.get("success"))
-
     return result.get("success")
 
 
@@ -167,18 +85,8 @@ def pdf_preview(file):
 
 
 def upload_file(file, service, progress=gr.Progress()):
-    """Handle file upload, validation, and initial preview."""
-    if not file or not os.path.exists(file):
-        return None, None
-
-    try:
-        # Convert first page for preview
-        preview_image = pdf_preview(file)
-
-        return file, preview_image
-    except Exception as e:
-        print(f"Error converting PDF: {e}")
-        return None, None
+    preview_image = pdf_preview(file)
+    return file, preview_image
 
 
 def download_with_limit(url, save_path, size_limit):
@@ -187,10 +95,10 @@ def download_with_limit(url, save_path, size_limit):
     with requests.get(url, stream=True, timeout=10) as response:
         response.raise_for_status()
         content = response.headers.get("Content-Disposition")
-        try:
+        try:  # filename from header
             _, params = cgi.parse_header(content)
             filename = params["filename"]
-        except Exception:
+        except Exception:  # filename from url
             filename = os.path.basename(url)
         with open(save_path / filename, "wb") as file:
             for chunk in response.iter_content(chunk_size=chunk_size):
@@ -206,15 +114,12 @@ def translate(
     file_input,
     link_input,
     service,
-    apikey,
-    apikey2,
-    apikey3,
-    model_id,
     lang_from,
     lang_to,
     page_range,
     recaptcha_response,
     progress=gr.Progress(),
+    *envs,
 ):
     """Translate PDF content using selected service."""
     if flag_demo and not verify_recaptcha(recaptcha_response):
@@ -243,13 +148,13 @@ def translate(
     file_zh = output / f"{filename}-zh.pdf"
     file_dual = output / f"{filename}-dual.pdf"
 
-    selected_service = service
+    translator = service_map[service]
     selected_page = page_map[page_range]
     lang_from = lang_map[lang_from]
     lang_to = lang_map[lang_to]
 
-    VariablesSetter = TranslationVariables(service_map, apikey, apikey2, apikey3)
-    VariablesSetter.process_service(lang_from, lang_to, selected_service)
+    for i, env in enumerate(translator.envs.items()):
+        os.environ[env[0]] = envs[i]
 
     print(f"Files before translation: {os.listdir(output)}")
 
@@ -261,7 +166,7 @@ def translate(
         "pages": selected_page,
         "lang_in": lang_from,
         "lang_out": lang_to,
-        "service": f"{selected_service}:{model_id}",
+        "service": f"{translator.name}",
         "output": output,
         "thread": 4,
         "callback": progress_bar,
@@ -288,44 +193,6 @@ def translate(
         gr.update(visible=True),
         gr.update(visible=True),
     )
-
-
-class TranslationVariables:
-    def __init__(self, service_map, apikey, apikey2=None, apikey3=None):
-        self.service_map = service_map
-        self.apikey = apikey
-        self.apikey2 = apikey2
-        self.apikey3 = apikey3
-
-    def set_language(self, lang_from, lang_to, selected_service):
-        """Sets the language parameters based on the selected service."""
-        if selected_service == "google":
-            lang_from = "zh-CN" if lang_from == "zh" else lang_from
-            lang_to = "zh-CN" if lang_to == "zh" else lang_to
-        return lang_from, lang_to
-
-    def set_environment_variables(self, selected_service):
-        """Sets the environment variables based on the selected service."""
-        print(self.service_map, selected_service)
-        if selected_service in self.service_map:
-            service_info = self.service_map[selected_service]
-            if service_info[0]:
-                os.environ.setdefault(service_info[0], self.apikey)
-                print(service_info[0], self.apikey)
-            if service_info[1]:
-                os.environ.setdefault(service_info[1], self.apikey2)
-                print(service_info[1], self.apikey2)
-            if service_info[2]:
-                os.environ.setdefault(service_info[2], self.apikey3)
-                print(service_info[2], self.apikey3)
-        else:
-            raise gr.Error("Strange Service")
-
-    def process_service(self, lang_from, lang_to, selected_service):
-        """Main processing method for the selected service."""
-        lang_from, lang_to = self.set_language(lang_from, lang_to, selected_service)
-        self.set_environment_variables(selected_service)
-        return lang_from, lang_to
 
 
 # Global setup
@@ -376,19 +243,6 @@ with gr.Blocks(
     .progress-bar {
     border-radius: 8px !important;
     }
-
-    # .input-file label {
-    #     color: #165DFF !important;
-    #     border: 1.2px dashed #165DFF !important;
-    #     border-left: none !important;
-    #     border-top: none !important;
-    # }
-    # .input-file .wrap {
-    #     color: #165DFF !important;
-    # }
-    # .input-file .or {
-    #     color: #165DFF !important;
-    # }
     """,
     head=(
         """
@@ -430,16 +284,18 @@ with gr.Blocks(
                 interactive=True,
             )
             gr.Markdown("## Option")
-            with gr.Row():
-                service = gr.Dropdown(
-                    label="Service",
-                    choices=service_map.keys(),
-                    value="Google",
-                )
-                apikey = gr.Textbox(
-                    label="API Key",
-                    max_lines=1,
-                    visible=False,
+            service = gr.Dropdown(
+                label="Service",
+                choices=service_map.keys(),
+                value="Google",
+            )
+            envs = []
+            for i in range(3):
+                envs.append(
+                    gr.Textbox(
+                        visible=False,
+                        interactive=True,
+                    )
                 )
             with gr.Row():
                 lang_from = gr.Dropdown(
@@ -457,96 +313,17 @@ with gr.Blocks(
                 label="Pages",
                 value=list(page_map.keys())[0],
             )
-            model_id = gr.Textbox(
-                label="Model ID",
-                visible=False,
-                interactive=True,
-            )
-            apikey2 = gr.Textbox(
-                label="API Key 2",
-                max_lines=1,
-                visible=False,
-            )
-            apikey3 = gr.Textbox(
-                label="API Key 3",
-                max_lines=1,
-                visible=False,
-            )
-            envs_status = "<span class='env-success'>- Properly configured.</span><br>"
-
-            def details_wrapper(text_markdown):
-                text = f"""
-                    <summary>Technical details</summary>
-                    {text_markdown}
-                    - GitHub: <a href="https://github.com/Byaidu/PDFMathTranslate">Byaidu/PDFMathTranslate</a><br>
-                    - GUI by: <a href="https://github.com/reycn">Rongxin</a><br>
-                    - Version: {__version__}
-                """
-                return text
-
-            def env_var_checker(env_var_name: str) -> str:
-                envvarflag = True
-                envs_status = ""
-                for envvar in env_var_name:
-                    if envvar:
-                        if not os.environ.get(envvar):
-                            envs_status += f"<span class='env-warning'>- Warning: environmental not found or error ({envvar}).</span><br>"
-                            envvarflag = False
-                        else:
-                            value = str(os.environ.get(envvar))
-                            envs_status += (
-                                f"- {envvar}: <code>{value[:13]}***</code><br>"
-                            )
-
-                if envvarflag:
-                    envs_status = (
-                        "<span class='env-success'>- Properly configured.</span><br>"
-                    )
-                else:
-                    envs_status += "- Please make sure that the environment variables are properly configured "
-                    envs_status += "(<a href='https://github.com/Byaidu/PDFMathTranslate'>guide</a>).<br>"
-                return details_wrapper(envs_status)
 
             def on_select_service(service, evt: gr.EventData):
-                if service in service_config:
-                    config = service_config[service]
-                    apikey_content = gr.update(
-                        **(
-                            config["apikey_content"](service_map[service])
-                            if callable(config["apikey_content"])
-                            else config["apikey_content"]
-                        )
+                translator = service_map[service]
+                _envs = []
+                for i in range(3):
+                    _envs.append(gr.update(visible=False, value=""))
+                for i, env in enumerate(translator.envs.items()):
+                    _envs[i] = gr.update(
+                        visible=True, label=env[0], value=os.getenv(env[0], env[1])
                     )
-                    apikey2_visibility = gr.update(
-                        **(
-                            config["apikey2_visibility"](service_map[service])
-                            if callable(config["apikey2_visibility"])
-                            else config["apikey2_visibility"]
-                        )
-                    )
-                    model_visibility = gr.update(
-                        **(
-                            config["model_visibility"](service_map[service])
-                            if callable(config["model_visibility"])
-                            else config["model_visibility"]
-                        )
-                    )
-                    apikey3_visibility = gr.update(
-                        **(
-                            config["apikey3_visibility"](service_map[service])
-                            if callable(config["apikey3_visibility"])
-                            else config["apikey3_visibility"]
-                        )
-                    )
-                else:
-                    raise gr.Error("Strange Service")
-                return (
-                    env_var_checker(service_map[service]),
-                    model_visibility,
-                    apikey_content,
-                    apikey2_visibility,
-                    apikey3_visibility,
-                )
+                return _envs
 
             def on_select_filetype(file_type):
                 return (
@@ -565,13 +342,18 @@ with gr.Blocks(
             recaptcha_box = gr.HTML('<div id="recaptcha-box"></div>')
             translate_btn = gr.Button("Translate", variant="primary")
             tech_details_tog = gr.Markdown(
-                details_wrapper(envs_status),
+                f"""
+                    <summary>Technical details</summary>
+                    - GitHub: <a href="https://github.com/Byaidu/PDFMathTranslate">Byaidu/PDFMathTranslate</a><br>
+                    - GUI by: <a href="https://github.com/reycn">Rongxin</a><br>
+                    - Version: {__version__}
+                """,
                 elem_classes=["secondary-text"],
             )
             service.select(
                 on_select_service,
                 service,
-                [tech_details_tog, model_id, apikey, apikey2, apikey3],
+                envs,
             )
             file_type.select(
                 on_select_filetype,
@@ -627,14 +409,11 @@ with gr.Blocks(
             file_input,
             link_input,
             service,
-            apikey,
-            apikey2,
-            apikey3,
-            model_id,
             lang_from,
             lang_to,
             page_range,
             recaptcha_response,
+            *envs,
         ],
         outputs=[
             output_file,

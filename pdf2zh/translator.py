@@ -1,14 +1,10 @@
-import hashlib
-import hmac
 import html
 import logging
 import os
 from datetime import timezone, datetime
 from dotenv import load_dotenv
-
-load_dotenv()  # 加载 .env 文件
-
 from json import dumps, loads
+import re
 import unicodedata
 
 import deepl
@@ -17,6 +13,10 @@ import openai
 import requests
 from azure.ai.translation.text import TextTranslationClient
 from azure.core.credentials import AzureKeyCredential
+from tencentcloud.common import credential
+from tencentcloud.tmt.v20180321.tmt_client import TmtClient
+from tencentcloud.tmt.v20180321.models import TextTranslateRequest
+from tencentcloud.tmt.v20180321.models import TextTranslateResponse
 
 
 def remove_control_characters(s):
@@ -24,25 +24,55 @@ def remove_control_characters(s):
 
 
 class BaseTranslator:
-    def __init__(self, service, lang_out, lang_in, model):
+    name = "base"
+    envs = {}
+    lang_map = {}
+
+    def __init__(self, service, lang_out: str, lang_in: str, model):
+        lang_out = self.lang_map.get(lang_out.lower(), lang_out)
+        lang_in = self.lang_map.get(lang_in.lower(), lang_in)
         self.service = service
         self.lang_out = lang_out
         self.lang_in = lang_in
         self.model = model
 
-    def translate(self, text) -> str: ...  # noqa: E704
+    def translate(self, text):
+        pass
+
+    def prompt(self, text):
+        return [
+                {
+                    "role": "system",
+                    "content": """You are a professional translation engine specialized in academic and technical content. """,
+                },
+                {
+                    "role": "user",
+                    "content": f"""Please translate the following text from {self.lang_in} to {self.lang_out}. Follow these requirements:
+1. Keep all mathematical formulas (e.g. $v*$, $$equation$$) unchanged
+2. Preserve markdown formatting including lists, headings, and emphasis
+3. Maintain the original structure and layout, including all line breaks
+4. If any part cannot be confidently translated, keep it in the original language
+5. If the source text is empty or contains only whitespace, return the original text
+6. IMPORTANT: Each line in the output must correspond to the same line in the input
+
+Source Text: {text}
+
+Translated Text:""",
+                },
+            ]
 
     def __str__(self):
         return f"{self.service} {self.lang_out} {self.lang_in}"
 
 
 class GoogleTranslator(BaseTranslator):
+    name = "google"
+    lang_map = {"zh": "zh-CN"}
+
     def __init__(self, service, lang_out, lang_in, model):
-        lang_out = "zh-CN" if lang_out == "auto" else lang_out
-        lang_in = "en" if lang_in == "auto" else lang_in
         super().__init__(service, lang_out, lang_in, model)
         self.session = requests.Session()
-        self.base_link = "http://translate.google.com/m"
+        self.endpoint = "http://translate.google.com/m"
         self.headers = {
             "User-Agent": "Mozilla/4.0 (compatible;MSIE 6.0;Windows NT 5.1;SV1;.NET CLR 1.1.4322;.NET CLR 2.0.50727;.NET CLR 3.0.04506.30)"  # noqa: E501
         }
@@ -52,7 +82,7 @@ class GoogleTranslator(BaseTranslator):
             return ""
         text = text[:5000]  # google translate max length
         response = self.session.get(
-            self.base_link,
+            self.endpoint,
             params={"tl": self.lang_out, "sl": self.lang_in, "q": text},
             headers=self.headers,
         )
@@ -61,199 +91,67 @@ class GoogleTranslator(BaseTranslator):
         )
         if response.status_code == 400:
             result = "IRREPARABLE TRANSLATION ERROR"
-        elif len(re_result) == 0:
-            raise ValueError("Empty translation result")
         else:
             result = html.unescape(re_result[0])
         return remove_control_characters(result)
 
 
-class TencentTranslator(BaseTranslator):
-    def sign(self, key, msg):
-        return hmac.new(key, msg.encode("utf-8"), hashlib.sha256).digest()
+class BingTranslator(BaseTranslator):
+    # https://github.com/immersive-translate/old-immersive-translate/blob/6df13da22664bea2f51efe5db64c63aca59c4e79/src/background/translationService.js
+    # TODO: IID & IG
+    name = "bing"
+    lang_map = {"zh": "zh-Hans"}
 
     def __init__(self, service, lang_out, lang_in, model):
-        lang_out = "zh" if lang_out == "auto" else lang_out
-        lang_in = "en" if lang_in == "auto" else lang_in
         super().__init__(service, lang_out, lang_in, model)
-        try:
-            server_url = "tmt.tencentcloudapi.com"
-            self.secret_id = os.getenv("TENCENT_SECRET_ID")
-            self.secret_key = os.getenv("TENCENT_SECRET_KEY")
-
-        except KeyError as e:
-            missing_var = e.args[0]
-            raise ValueError(
-                f"The environment variable '{missing_var}' is required but not set."
-            ) from e
-
         self.session = requests.Session()
-        self.base_link = f"{server_url}"
+        self.endpoint = "https://www.bing.com/ttranslatev3"
+        self.headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 Edg/131.0.0.0",  # noqa: E501
+        }
+
+    def fineSID(self):
+        resp = self.session.get("https://www.bing.com/translator")
+        ig = re.findall(r"\"ig\":\"(.*?)\"", resp.text)[0]
+        iid = re.findall(r"data-iid=\"(.*?)\"", resp.text)[-1]
+        key, token = re.findall(
+            r"params_AbusePreventionHelper\s=\s\[(.*?),\"(.*?)\",", resp.text
+        )[0]
+        return ig, iid, key, token
 
     def translate(self, text):
         if not text or not text.strip() or text.strip() == '$v0$':
             return ""
-        text = text[:5000]
-        data = {
-            "SourceText": text,
-            "Source": self.lang_in,
-            "Target": self.lang_out,
-            "ProjectId": 0,
-        }
-        payloadx = dumps(data)
-        hashed_request_payload = hashlib.sha256(payloadx.encode("utf-8")).hexdigest()
-        canonical_request = (
-            "POST"
-            + "\n"
-            + "/"
-            + "\n"
-            + ""
-            + "\n"
-            + "content-type:application/json; charset=utf-8\nhost:tmt.tencentcloudapi.com\nx-tc-action:texttranslate\n"
-            + "\n"
-            + "content-type;host;x-tc-action"
-            + "\n"
-            + hashed_request_payload
-        )
-
-        timestamp = int(time.time())
-        date = datetime.fromtimestamp(timestamp, timezone.utc).strftime("%Y-%m-%d")
-        credential_scope = date + "/tmt/tc3_request"
-        hashed_canonical_request = hashlib.sha256(
-            canonical_request.encode("utf-8")
-        ).hexdigest()
-        algorithm = "TC3-HMAC-SHA256"
-        string_to_sign = (
-            algorithm
-            + "\n"
-            + str(timestamp)
-            + "\n"
-            + credential_scope
-            + "\n"
-            + hashed_canonical_request
-        )
-        secret_date = self.sign(("TC3" + str(self.secret_key)).encode("utf-8"), date)
-        secret_service = self.sign(secret_date, "tmt")
-        secret_signing = self.sign(secret_service, "tc3_request")
-        signed_headers = "content-type;host;x-tc-action"
-        signature = hmac.new(
-            secret_signing, string_to_sign.encode("utf-8"), hashlib.sha256
-        ).hexdigest()
-        authorization = (
-            algorithm
-            + " "
-            + "Credential="
-            + str(self.secret_id)
-            + "/"
-            + credential_scope
-            + ", "
-            + "SignedHeaders="
-            + signed_headers
-            + ", "
-            + "Signature="
-            + signature
-        )
-        self.headers = {
-            "Authorization": authorization,
-            "Content-Type": "application/json; charset=utf-8",
-            "Host": "tmt.tencentcloudapi.com",
-            "X-TC-Action": "TextTranslate",
-            "X-TC-Region": "ap-beijing",
-            "X-TC-Timestamp": str(timestamp),
-            "X-TC-Version": "2018-03-21",
-        }
-
-        response = self.session.post(
-            "https://" + self.base_link,
-            json=data,
+        text = text[:1000]  # bing translate max length
+        ig, iid, key, token = self.fineSID()
+        resp = self.session.post(
+            f"{self.endpoint}?IG={ig}&IID={iid}",
+            data={
+                "fromLang": self.lang_in,
+                "to": self.lang_out,
+                "text": text,
+                "token": token,
+                "key": key,
+            },
             headers=self.headers,
         )
-        # 1. Status code test
-        if response.status_code == 200:
-            result = loads(response.text)
-        else:
-            raise ValueError("HTTP error: " + str(response.status_code))
-        # 2. Result test
-        try:
-            result = result["Response"]["TargetText"]
-            # return result
-        except KeyError:
-            result = ""
-        #     raise ValueError("No valid key in Tencent's response")
-        # # 3. Result length check
-        # if len(result) == 0:
-        #     raise ValueError("Empty translation result")
-        return result
-
-
-class DeepLXTranslator(BaseTranslator):
-    def __init__(self, service, lang_out, lang_in, model):
-        lang_out = "zh" if lang_out == "auto" else lang_out
-        lang_in = "en" if lang_in == "auto" else lang_in
-        super().__init__(service, lang_out, lang_in, model)
-        try:
-            auth_key = os.getenv("DEEPLX_AUTH_KEY")
-            server_url = (
-                "https://api.deeplx.org"
-                if not os.getenv("DEEPLX_SERVER_URL")
-                else os.getenv("DEEPLX_SERVER_URL")
-            )
-        except KeyError as e:
-            missing_var = e.args[0]
-            raise ValueError(
-                f"The environment variable '{missing_var}' is required but not set."
-            ) from e
-
-        self.session = requests.Session()
-        server_url = str(server_url).rstrip("/")
-        if auth_key:
-            self.base_link = f"{server_url}/{auth_key}/translate"
-        else:
-            self.base_link = f"{server_url}/translate"
-        self.headers = {
-            "User-Agent": "Mozilla/4.0 (compatible;MSIE 6.0;Windows NT 5.1;SV1;.NET CLR 1.1.4322;.NET CLR 2.0.50727;.NET CLR 3.0.04506.30)"  # noqa: E501
-        }
-
-    def translate(self, text):
-        if not text or not text.strip() or text.strip() == '$v0$':
-            return ""
-        text = text[:5000]  # google translate max length
-        response = self.session.post(
-            self.base_link,
-            dumps(
-                {
-                    "target_lang": self.lang_out,
-                    "text": text,
-                }
-            ),
-            headers=self.headers,
-        )
-        # 1. Status code test
-        if response.status_code == 200:
-            result = loads(response.text)
-        else:
-            raise ValueError("HTTP error: " + str(response.status_code))
-        # 2. Result test
-        try:
-            result = result["data"]
-            return result
-        except KeyError:
-            result = ""
-            raise ValueError("No valid key in DeepLX's response")
-        # 3. Result length check
-        if len(result) == 0:
-            raise ValueError("Empty translation result")
-        return result
+        return resp.json()[0]["translations"][0]["text"]
 
 
 class DeepLTranslator(BaseTranslator):
+    # https://github.com/DeepLcom/deepl-python
+    name = "deepl"
+    envs = {
+        "DEEPL_SERVER_URL": "https://api.deepl.com",
+        "DEEPL_AUTH_KEY": None,
+    }
+    lang_map = {"zh": "zh-Hans"}
+
     def __init__(self, service, lang_out, lang_in, model):
-        lang_out = "ZH" if lang_out == "auto" else lang_out
-        lang_in = "EN" if lang_in == "auto" else lang_in
         super().__init__(service, lang_out, lang_in, model)
         self.session = requests.Session()
+        server_url = os.getenv("DEEPL_SERVER_URL", self.envs["DEEPL_SERVER_URL"])
         auth_key = os.getenv("DEEPL_AUTH_KEY")
-        server_url = os.getenv("DEEPL_SERVER_URL")
         self.client = deepl.Translator(auth_key, server_url=server_url)
 
     def translate(self, text):
@@ -265,13 +163,44 @@ class DeepLTranslator(BaseTranslator):
         return response.text
 
 
-class OllamaTranslator(BaseTranslator):
+class DeepLXTranslator(BaseTranslator):
+    # https://deeplx.owo.network/endpoints/free.html
+    name = "deeplx"
+    envs = {
+        "DEEPLX_ENDPOINT": "https://api.deepl.com/translate",
+    }
+    lang_map = {"zh": "zh-Hans"}
+
     def __init__(self, service, lang_out, lang_in, model):
-        lang_out = "zh-CN" if lang_out == "auto" else lang_out
-        lang_in = "en" if lang_in == "auto" else lang_in
+        super().__init__(service, lang_out, lang_in, model)
+        self.endpoint = os.getenv("DEEPLX_ENDPOINT", self.envs["DEEPLX_ENDPOINT"])
+        self.session = requests.Session()
+
+    def translate(self, text):
+        resp = self.session.post(
+            self.endpoint,
+            json={
+                "source_lang": self.lang_in,
+                "target_lang": self.lang_out,
+                "text": text,
+            },
+        )
+        return resp.json()["data"]
+
+
+class OllamaTranslator(BaseTranslator):
+    # https://github.com/ollama/ollama-python
+    name = "ollama"
+    envs = {
+        "OLLAMA_HOST": "http://127.0.0.1:11434",
+        "OLLAMA_MODEL": "gemma2",
+    }
+
+    def __init__(self, service, lang_out, lang_in, model):
+        if not model:
+            model = os.getenv("OLLAMA_MODEL", self.envs["OLLAMA_MODEL"])
         super().__init__(service, lang_out, lang_in, model)
         self.options = {"temperature": 0}  # 随机采样可能会打断公式标记
-        # OLLAMA_HOST
         self.client = ollama.Client()
 
     def translate(self, text):
@@ -280,28 +209,25 @@ class OllamaTranslator(BaseTranslator):
         response = self.client.chat(
             model=self.model,
             options=self.options,
-            messages=[
-                {
-                    "role": "system",
-                    "content": "You are a professional,authentic machine translation engine.",
-                },
-                {
-                    "role": "user",
-                    "content": f"Translate the following markdown source text to {self.lang_out}. Keep the formula notation $v*$ unchanged. Output translation directly without any additional text.\nSource Text: {text}\nTranslated Text:",  # noqa: E501
-                },
-            ],
+            messages=self.prompt(text),
         )
         return response["message"]["content"].strip()
 
 
 class OpenAITranslator(BaseTranslator):
+    # https://github.com/openai/openai-python
+    name = "openai"
+    envs = {
+        "OPENAI_BASE_URL": "https://apis.bltcy.ai/v1",
+        "OPENAI_API_KEY": None,
+        "OPENAI_MODEL": "gpt-4o-mini",
+    }
+
     def __init__(self, service, lang_out, lang_in, model):
-        lang_out = "zh-CN" if lang_out == "auto" else lang_out
-        lang_in = "en" if lang_in == "auto" else lang_in
+        if not model:
+            model = os.getenv("OPENAI_MODEL", self.envs["OPENAI_MODEL"])
         super().__init__(service, lang_out, lang_in, model)
         self.options = {"temperature": 0}  # 随机采样可能会打断公式标记
-        
-        from dotenv import load_dotenv
         load_dotenv(override=True)
         self.client = openai.OpenAI()
 
@@ -314,26 +240,7 @@ class OpenAITranslator(BaseTranslator):
             response = self.client.chat.completions.create(
                 model=self.model,
                 **self.options,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": """You are a professional translation engine specialized in academic and technical content. """,
-                    },
-                    {
-                        "role": "user",
-                        "content": f"""Please translate the following text from {self.lang_in} to {self.lang_out}. Follow these requirements:
-1. Keep all mathematical formulas (e.g. $v*$, $$equation$$) unchanged
-2. Preserve markdown formatting including lists, headings, and emphasis
-3. Maintain the original structure and layout, including all line breaks
-4. If any part cannot be confidently translated, keep it in the original language
-5. If the source text is empty or contains only whitespace, return the original text
-6. IMPORTANT: Each line in the output must correspond to the same line in the input
-
-Source Text: {text}
-
-Translated Text:""",
-                    },
-                ],
+                messages=self.prompt(text),
             )
             return response.choices[0].message.content.strip()
         except Exception as e:
@@ -341,27 +248,59 @@ Translated Text:""",
             return text
 
 
-class AzureTranslator(BaseTranslator):
+class ZhipuTranslator(OpenAITranslator):
+    # https://bigmodel.cn/dev/api/thirdparty-frame/openai-sdk
+    name = "zhipu"
+    envs = {
+        "ZHIPU_API_KEY": None,
+        "ZHIPU_MODEL": "glm-4-flash",
+    }
+
     def __init__(self, service, lang_out, lang_in, model):
-        lang_out = "zh-Hans" if lang_out == "auto" else lang_out
-        lang_in = "en" if lang_in == "auto" else lang_in
-        super().__init__(service, lang_out, lang_in, model)
-
-        try:
-            api_key = os.environ["AZURE_APIKEY"]
-            endpoint = os.environ["AZURE_ENDPOINT"]
-            region = os.environ["AZURE_REGION"]
-        except KeyError as e:
-            missing_var = e.args[0]
-            raise ValueError(
-                f"The environment variable '{missing_var}' is required but not set."
-            ) from e
-
-        credential = AzureKeyCredential(api_key)
-        self.client = TextTranslationClient(
-            endpoint=endpoint, credential=credential, region=region
+        base_url = "https://open.bigmodel.cn/api/paas/v4"
+        api_key = os.getenv("ZHIPU_API_KEY")
+        if not model:
+            model = os.getenv("ZHIPU_MODEL", self.envs["ZHIPU_MODEL"])
+        super().__init__(
+            service, lang_out, lang_in, model, base_url=base_url, api_key=api_key
         )
 
+
+class SiliconTranslator(OpenAITranslator):
+    # https://docs.siliconflow.cn/quickstart
+    name = "silicon"
+    envs = {
+        "SILICON_API_KEY": None,
+        "SILICON_MODEL": "Qwen/Qwen2.5-7B-Instruct",
+    }
+
+    def __init__(self, service, lang_out, lang_in, model):
+        base_url = "https://api.siliconflow.cn/v1"
+        api_key = os.getenv("SILICON_API_KEY")
+        if not model:
+            model = os.getenv("SILICON_MODEL", self.envs["SILICON_MODEL"])
+        super().__init__(
+            service, lang_out, lang_in, model, base_url=base_url, api_key=api_key
+        )
+
+
+class AzureTranslator(BaseTranslator):
+    # https://github.com/Azure/azure-sdk-for-python
+    name = "azure"
+    envs = {
+        "AZURE_ENDPOINT": "https://api.translator.azure.cn",
+        "AZURE_API_KEY": None,
+    }
+    lang_map = {"zh": "zh-Hans"}
+
+    def __init__(self, service, lang_out, lang_in, model):
+        super().__init__(service, lang_out, lang_in, model)
+        endpoint = os.getenv("AZURE_ENDPOINT", self.envs["AZURE_ENDPOINT"])
+        api_key = os.getenv("AZURE_API_KEY")
+        credential = AzureKeyCredential(api_key)
+        self.client = TextTranslationClient(
+            endpoint=endpoint, credential=credential, region="chinaeast2"
+        )
         # https://github.com/Azure/azure-sdk-for-python/issues/9422
         logger = logging.getLogger("azure.core.pipeline.policies.http_logging_policy")
         logger.setLevel(logging.WARNING)
@@ -376,6 +315,28 @@ class AzureTranslator(BaseTranslator):
             from_language=self.lang_in,
             to_language=[self.lang_out],
         )
-
         translated_text = response[0].translations[0].text
         return translated_text
+
+
+class TencentTranslator(BaseTranslator):
+    # https://github.com/TencentCloud/tencentcloud-sdk-python
+    name = "tencent"
+    envs = {
+        "TENCENTCLOUD_SECRET_ID": None,
+        "TENCENTCLOUD_SECRET_KEY": None,
+    }
+
+    def __init__(self, service, lang_out, lang_in, model):
+        super().__init__(service, lang_out, lang_in, model)
+        cred = credential.DefaultCredentialProvider().get_credential()
+        self.client = TmtClient(cred, "ap-beijing")
+        self.req = TextTranslateRequest()
+        self.req.Source = self.lang_in
+        self.req.Target = self.lang_out
+        self.req.ProjectId = 0
+
+    def translate(self, text):
+        self.req.SourceText = text
+        resp: TextTranslateResponse = self.client.TextTranslate(self.req)
+        return resp.TargetText

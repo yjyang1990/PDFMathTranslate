@@ -19,10 +19,13 @@ from pdf2zh import cache
 from pdf2zh.translator import (
     BaseTranslator,
     GoogleTranslator,
+    BingTranslator,
     DeepLTranslator,
     DeepLXTranslator,
     OllamaTranslator,
     OpenAITranslator,
+    ZhipuTranslator,
+    SiliconTranslator,
     AzureTranslator,
     TencentTranslator,
 )
@@ -182,21 +185,12 @@ class TranslateConverter(PDFConverterEx):
             self._noto_font = noto
         self.translator: BaseTranslator = None
         param = service.split(":", 1)
-        if param[0] == "google":
-            self.translator = GoogleTranslator(service, lang_out, lang_in, None)
-        elif param[0] == "deepl":
-            self.translator = DeepLTranslator(service, lang_out, lang_in, None)
-        elif param[0] == "deeplx":
-            self.translator = DeepLXTranslator(service, lang_out, lang_in, None)
-        elif param[0] == "ollama":
-            self.translator = OllamaTranslator(service, lang_out, lang_in, param[1])
-        elif param[0] == "openai":
-            self.translator = OpenAITranslator(service, lang_out, lang_in, param[1])
-        elif param[0] == "azure":
-            self.translator = AzureTranslator(service, lang_out, lang_in, None)
-        elif param[0] == "tencent":
-            self.translator = TencentTranslator(service, lang_out, lang_in, None)
-        else:
+        service_name = param[0]
+        service_model = param[1] if len(param) > 1 else None
+        for translator in [GoogleTranslator, BingTranslator, DeepLTranslator, DeepLXTranslator, OllamaTranslator, OpenAITranslator, ZhipuTranslator, SiliconTranslator, AzureTranslator, TencentTranslator]:
+            if service_name == translator.name:
+                self.translator = translator(service, lang_out, lang_in, service_model)
+        if not self.translator:
             raise ValueError("Unsupported translation service")
 
     def receive_layout(self, ltpage: LTPage):
@@ -239,7 +233,7 @@ class TranslateConverter(PDFConverterEx):
             else:
                 # 只匹配明确的数学和符号字体，不包括普通斜体和拉丁文
                 if re.match(
-                    r"(CM[^R]|(MS|XY|MT|BL|RM|EU|RS)[A-Z]|LINE|TeX-|rsfs|txsy|wasy|stmary|.*Math|.*Sym)",
+                    r"(CM[^R]|(MS|XY|MT|BL|RM|EU|LA|RS)[A-Z]|LINE|LCIRCLE|TeX-|rsfs|txsy|wasy|stmary|.*Mono|.*Code|.*Ital|.*Sym|.*Math)",
                     font,
                 ):
                     return True
@@ -409,6 +403,8 @@ class TranslateConverter(PDFConverterEx):
 
         @retry(wait=wait_fixed(1))
         def worker(s: str):  # 多线程翻译
+            if re.match(r"^\$v\d+\$$", s):  # 公式不翻译
+                return s
             try:
                 hash_key_paragraph = cache.deterministic_hash(
                     (s, str(self.translator))
@@ -533,7 +529,6 @@ class TranslateConverter(PDFConverterEx):
                         cstk = ""
                 if brk and x + adv > x1 + 0.1 * size:  # 到达右边界且原文段落存在换行
                     x = x0
-                    # 优化不同语言的行间距和段落间距
                     lang_space = {
                         "zh-CN": 1.75,  # 增加中文行间距
                         "zh-TW": 1.75,

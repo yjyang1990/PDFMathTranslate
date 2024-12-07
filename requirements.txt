@@ -5,3 +5,4 @@ doclayout-yolo
 torch
 onnx
 onnxruntime
+tencentcloud-sdk-python
