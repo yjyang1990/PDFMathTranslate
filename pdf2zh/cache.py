@@ -5,6 +5,7 @@ import hashlib
 import shutil
 
 cache_dir = os.path.join(tempfile.gettempdir(), "cache")
+print(f"Cache directory is located at: {cache_dir}")
 os.makedirs(cache_dir, exist_ok=True)
 time_filename = "update_time"
 max_cache = 5

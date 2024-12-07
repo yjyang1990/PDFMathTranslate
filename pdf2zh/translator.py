@@ -317,7 +317,7 @@ class OpenAITranslator(BaseTranslator):
                 messages=[
                     {
                         "role": "system",
-                        "content": """You are a professional translation engine specialized in academic and technical content.""",
+                        "content": """You are a professional translation engine specialized in academic and technical content. """,
                     },
                     {
                         "role": "user",
