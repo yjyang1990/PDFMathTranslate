@@ -233,7 +233,7 @@ class TranslateConverter(PDFConverterEx):
             else:
                 # 只匹配明确的数学和符号字体，不包括普通斜体和拉丁文
                 if re.match(
-                    r"(CM[^R]|(MS|XY|MT|BL|RM|EU|LA|RS)[A-Z]|LINE|LCIRCLE|TeX-|rsfs|txsy|wasy|stmary|.*Mono|.*Code|.*Ital|.*Sym|.*Math)",
+                    r"(CM[^R]|(MS|XY|MT|BL|RM|EU|RS)[A-Z]|LINE|TeX-|rsfs|txsy|wasy|stmary|.*Math|.*Sym)",
                     font,
                 ):
                     return True
