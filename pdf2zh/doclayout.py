@@ -24,7 +24,6 @@ class DocLayoutModel(abc.ABC):
         # First try to load from local models directory
         print('torch-----local_path')
         local_path = os.path.join(os.path.dirname(__file__), "models", "doclayout_yolo_docstructbench_imgsz1024.pt")
-        print(local_path)
         if os.path.exists(local_path):
             try:
                 return TorchModel(local_path)

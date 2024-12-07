@@ -12,6 +12,7 @@ import uuid
 from datetime import datetime
 from dotenv import load_dotenv
 from enum import Enum
+import redis
 
 # 加载环境变量
 load_dotenv()
@@ -21,6 +22,22 @@ API_HOST = os.getenv("API_HOST", "127.0.0.1")
 API_PORT = int(os.getenv("API_PORT", "8080"))
 BASE_URL = os.getenv("BASE_URL", f"http://{API_HOST}:{API_PORT}")
 
+# Redis配置
+REDIS_CONFIG = {
+    "host": os.getenv("REDIS_CONFIG_HOST", "localhost"),
+    "port": int(os.getenv("REDIS_CONFIG_PORT", 6379)),
+    "db": int(os.getenv("REDIS_CONFIG_DB", 0)),
+    "password": os.getenv("REDIS_CONFIG_PASSWORD", ""),
+    "decode_responses": True
+}
+
+# Redis连接
+redis_client = redis.Redis(**REDIS_CONFIG)
+
+# Redis key前缀
+REDIS_KEY_PREFIX = "pdf_translation:"
+REDIS_EXPIRE_TIME = 60 * 60 * 24  # 24小时过期
+
 app = FastAPI(
     title="PDF Translation API",
     description="PDF translation service with multiple translation providers",
@@ -28,7 +45,7 @@ app = FastAPI(
 )
 
 # 存储翻译任务的状态
-translation_tasks = {}
+# translation_tasks = {}  # 移除内存字典
 
 # 配置与gui.py相同的服务和语言映射
 service_map = {
@@ -96,12 +113,15 @@ class TranslationStatus(BaseModel):
     last_updated: Optional[str] = None
 
 def save_task_status(task_id: str, status_data: dict):
-    """保存任务状态到内存"""
-    translation_tasks[task_id] = status_data
+    """保存任务状态到Redis"""
+    redis_key = f"{REDIS_KEY_PREFIX}{task_id}"
+    redis_client.set(redis_key, json.dumps(status_data), ex=REDIS_EXPIRE_TIME)
 
 def get_task_status(task_id: str) -> Optional[dict]:
-    """从内存获取任务状态"""
-    return translation_tasks.get(task_id)
+    """从Redis获取任务状态"""
+    redis_key = f"{REDIS_KEY_PREFIX}{task_id}"
+    data = redis_client.get(redis_key)
+    return json.loads(data) if data else None
 
 def update_task_progress(task_id: str):
     """更新任务进度的回调函数"""
