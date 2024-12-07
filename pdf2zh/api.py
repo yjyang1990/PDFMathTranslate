@@ -111,7 +111,7 @@ def update_task_progress(task_id: str):
             current_page = progress_data.get("current", 0)
             
             if total_pages > 0:
-                progress = current_page / total_pages
+                progress = round(current_page / total_pages, 2)
             else:
                 progress = 0
                 
@@ -119,7 +119,7 @@ def update_task_progress(task_id: str):
             if status_data:
                 status_data.update({
                     "progress": progress,
-                    "message": f"Processing page {current_page} of {total_pages}",
+                    "message": f"Processing page {current_page} of {total_pages} ({progress * 100:.2f}%)",
                     "last_updated": datetime.now().isoformat()
                 })
                 save_task_status(task_id, status_data)
