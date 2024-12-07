@@ -546,7 +546,7 @@ class TranslateConverter(PDFConverterEx):
                     
                     # 在段落之间添加额外间距
                     if ptr >= len(new) - 1:  # 如果是段落的最后一行
-                        y -= size * 0.8  # 增加段落间距
+                        y -= size * 0.6  # 增加段落间距
                 if vy_regex:  # 插入公式
                     ops_parts.extend(process_formula(var[vid], varl[vid], varf[vid], x, y, fcur))
                 else:
