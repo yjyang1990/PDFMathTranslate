@@ -10,7 +10,6 @@ from pydantic import BaseModel
 from pdf2zh.pdf2zh import extract_text
 import tqdm
 import uuid
-import redis
 from datetime import datetime
 from dotenv import load_dotenv
 from enum import Enum
@@ -29,97 +28,10 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# Redis配置
-REDIS_CONFIG = {
-    "host": os.getenv("REDIS_CONFIG_HOST", "localhost"),
-    "port": int(os.getenv("REDIS_CONFIG_PORT", 6379)),
-    "db": int(os.getenv("REDIS_CONFIG_DB", 0)),
-    "password": os.getenv("REDIS_CONFIG_PASSWORD", ""),
-    "decode_responses": True
-}
-
-# Redis键前缀
-REDIS_KEY_PREFIX = "pdf_translate:"
-REDIS_HASH_PREFIX = "pdf_hash:"  # 新增文件哈希值前缀
-
-# 全局Redis客户端
-redis_client = None
-
-@app.on_event("startup")
-async def startup_event():
-    """服务启动时初始化Redis连接"""
-    global redis_client
-    try:
-        redis_client = redis.Redis(**REDIS_CONFIG)
-        redis_client.ping()  # 测试连接
-        print(f"Successfully connected to Redis at {REDIS_CONFIG['host']}:{REDIS_CONFIG['port']}")
-    except redis.ConnectionError as e:
-        print(f"Failed to connect to Redis: {str(e)}")
-        print("Using in-memory storage as fallback")
-        redis_client = None
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    """服务关闭时清理Redis连接"""
-    global redis_client
-    if redis_client:
-        print("Closing Redis connection...")
-        redis_client.close()
-        redis_client = None
-
-def get_redis_key(task_id: str) -> str:
-    """获取Redis中的任务键名"""
-    return f"{REDIS_KEY_PREFIX}{task_id}"
-
-def get_hash_key(file_hash: str) -> str:
-    """获取Redis中的文件哈希键名"""
-    return f"{REDIS_HASH_PREFIX}{file_hash}"
-
-def save_task_status(task_id: str, status_data: dict):
-    """保存任务状态到Redis或内存"""
-    status_data["last_updated"] = datetime.now().isoformat()
-    if redis_client:
-        redis_key = get_redis_key(task_id)
-        redis_client.set(redis_key, json.dumps(status_data))
-        redis_client.expire(redis_key, 86400)  # 24小时过期
-    else:
-        # 使用内存存储作为后备
-        translation_tasks[task_id] = status_data
-
-def get_task_status(task_id: str) -> Optional[dict]:
-    """从Redis或内存获取任务状态"""
-    if redis_client:
-        redis_key = get_redis_key(task_id)
-        data = redis_client.get(redis_key)
-        return json.loads(data) if data else None
-    else:
-        # 从内存获取
-        return translation_tasks.get(task_id)
-
-def save_file_hash_mapping(file_hash: str, task_id: str):
-    """保存文件哈希值与任务ID的映射关系到Redis"""
-    if redis_client:
-        hash_key = get_hash_key(file_hash)
-        redis_client.set(hash_key, task_id)
-        redis_client.expire(hash_key, 86400 * 7)  # 7天过期
-    else:
-        # 使用内存存储作为后备
-        file_hash_mapping[file_hash] = task_id
-
-def get_task_by_file_hash(file_hash: str) -> Optional[str]:
-    """通过文件哈希值获取任务ID"""
-    if redis_client:
-        hash_key = get_hash_key(file_hash)
-        task_id = redis_client.get(hash_key)
-        return task_id
-    else:
-        # 从内存获取
-        return file_hash_mapping.get(file_hash)
-
 # 存储翻译任务的状态
 translation_tasks = {}
 
-# 作为后备的内存存储
+# 存储文件哈希映射
 file_hash_mapping: Dict[str, str] = {}
 
 # 配置与gui.py相同的服务和语言映射
@@ -182,6 +94,23 @@ class TranslationStatus(BaseModel):
     output_file: Optional[str] = None
     output_file_dual: Optional[str] = None
     last_updated: Optional[str] = None
+
+def save_task_status(task_id: str, status_data: dict):
+    """保存任务状态到内存"""
+    status_data["last_updated"] = datetime.now().isoformat()
+    translation_tasks[task_id] = status_data
+
+def get_task_status(task_id: str) -> Optional[dict]:
+    """从内存获取任务状态"""
+    return translation_tasks.get(task_id)
+
+def save_file_hash_mapping(file_hash: str, task_id: str):
+    """保存文件哈希值与任务ID的映射关系到内存"""
+    file_hash_mapping[file_hash] = task_id
+
+def get_task_by_file_hash(file_hash: str) -> Optional[str]:
+    """通过文件哈希值获取任务ID"""
+    return file_hash_mapping.get(file_hash)
 
 def update_task_progress(task_id: str, t: tqdm.tqdm):
     """更新任务进度的回调函数"""
@@ -480,11 +409,6 @@ async def get_translation_status(task_id: str):
         status_data.setdefault("last_updated", datetime.now().isoformat())
         
         return TranslationStatus(**status_data)
-    except redis.ConnectionError as e:
-        raise HTTPException(
-            status_code=503,
-            detail=f"Redis connection error: {str(e)}"
-        )
     except Exception as e:
         raise HTTPException(
             status_code=500,
