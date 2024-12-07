@@ -506,7 +506,7 @@ class TranslateConverter(PDFConverterEx):
                     if fcur_ is None:
                         if self.translator.lang_out in ["zh-CN", "zh-TW"]:
                             # 调整中文字体大小，提高清晰度和可读性
-                            size = size * 1.12 if size < 12 else size * 1.08
+                            size = size * 0.95 if size < 12 else size * 0.92  # 减小字体大小
                             # 处理中文标点符号间距
                             if ch in '，。；：！？、':
                                 adv = adv * 0.8  # 减小中文标点符号间距
@@ -530,23 +530,23 @@ class TranslateConverter(PDFConverterEx):
                 if brk and x + adv > x1 + 0.1 * size:  # 到达右边界且原文段落存在换行
                     x = x0
                     lang_space = {
-                        "zh-CN": 1.75,  # 增加中文行间距
-                        "zh-TW": 1.75,
-                        "ja": 1.5,
-                        "ko": 1.5,
-                        "en": 1.3,
-                        "ar": 1.2,
-                        "ru": 1.2,
-                        "uk": 1.2,
-                        "ta": 1.2
+                        "zh-CN": 2.0,  # 增加中文行间距
+                        "zh-TW": 2.0,
+                        "ja": 1.8,
+                        "ko": 1.8,
+                        "en": 1.5,
+                        "ar": 1.4,
+                        "ru": 1.4,
+                        "uk": 1.4,
+                        "ta": 1.4
                     }
                     # 根据语言调整行间距，确保中文阅读体验
-                    line_spacing = lang_space.get(self.translator.lang_out, 1.3)
+                    line_spacing = lang_space.get(self.translator.lang_out, 1.5)
                     y -= size * line_spacing
                     
                     # 在段落之间添加额外间距
                     if ptr >= len(new) - 1:  # 如果是段落的最后一行
-                        y -= size * 0.5  # 添加额外的段落间距
+                        y -= size * 0.8  # 增加段落间距
                 if vy_regex:  # 插入公式
                     ops_parts.extend(process_formula(var[vid], varl[vid], varf[vid], x, y, fcur))
                 else:
