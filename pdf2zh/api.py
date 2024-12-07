@@ -40,6 +40,7 @@ REDIS_CONFIG = {
 
 # Redis键前缀
 REDIS_KEY_PREFIX = "pdf_translate:"
+REDIS_HASH_PREFIX = "pdf_hash:"  # 新增文件哈希值前缀
 
 # 全局Redis客户端
 redis_client = None
@@ -70,6 +71,10 @@ def get_redis_key(task_id: str) -> str:
     """获取Redis中的任务键名"""
     return f"{REDIS_KEY_PREFIX}{task_id}"
 
+def get_hash_key(file_hash: str) -> str:
+    """获取Redis中的文件哈希键名"""
+    return f"{REDIS_HASH_PREFIX}{file_hash}"
+
 def save_task_status(task_id: str, status_data: dict):
     """保存任务状态到Redis或内存"""
     status_data["last_updated"] = datetime.now().isoformat()
@@ -91,8 +96,31 @@ def get_task_status(task_id: str) -> Optional[dict]:
         # 从内存获取
         return translation_tasks.get(task_id)
 
+def save_file_hash_mapping(file_hash: str, task_id: str):
+    """保存文件哈希值与任务ID的映射关系到Redis"""
+    if redis_client:
+        hash_key = get_hash_key(file_hash)
+        redis_client.set(hash_key, task_id)
+        redis_client.expire(hash_key, 86400 * 7)  # 7天过期
+    else:
+        # 使用内存存储作为后备
+        file_hash_mapping[file_hash] = task_id
+
+def get_task_by_file_hash(file_hash: str) -> Optional[str]:
+    """通过文件哈希值获取任务ID"""
+    if redis_client:
+        hash_key = get_hash_key(file_hash)
+        task_id = redis_client.get(hash_key)
+        return task_id
+    else:
+        # 从内存获取
+        return file_hash_mapping.get(file_hash)
+
 # 存储翻译任务的状态
 translation_tasks = {}
+
+# 作为后备的内存存储
+file_hash_mapping: Dict[str, str] = {}
 
 # 配置与gui.py相同的服务和语言映射
 service_map = {
@@ -156,94 +184,18 @@ class TranslationStatus(BaseModel):
     last_updated: Optional[str] = None
 
 def update_task_progress(task_id: str, t: tqdm.tqdm):
-    """更新任务进度，确保不会阻塞"""
-    try:
-        status_data = get_task_status(task_id)
-        if status_data:
-            progress = round(t.n / t.total, 2)  # 保留两位小数
-            status_data["progress"] = progress
-            status_data["last_updated"] = datetime.now().isoformat()
-            
-            # 异步保存状态
-            save_task_status(task_id, status_data)
-            
-            print(f"Task {task_id} progress: {progress * 100}%")
-    except Exception as e:
-        print(f"Error updating progress for task {task_id}: {str(e)}")
-
-def get_download_url(task_id: str, dual: bool = False) -> str:
-    """生成下载URL"""
-    base_url = f"{BASE_URL}/download/{task_id}"
-    if dual:
-        return f"{base_url}?dual=true"
-    return base_url
-
-async def process_translation(task_id: str, input_file: Path, param: dict):
-    """处理翻译任务"""
-    try:
-        print(f"Starting translation with parameters: {param}")
-        status_data = get_task_status(task_id)
-        status_data["status"] = TaskStatus.PROCESSING
+    """更新任务进度的回调函数"""
+    def progress_callback(progress_obj):
+        t.update(1)  # 更新tqdm进度
+        progress = t.n / t.total if t.total > 0 else 0
+        status_data = {
+            "task_id": task_id,
+            "status": TaskStatus.PROCESSING,
+            "progress": progress,
+            "message": f"Processing... {t.n}/{t.total} pages"
+        }
         save_task_status(task_id, status_data)
-        
-        # 确保使用原始文件
-        original_filename = input_file.name
-        if original_filename.endswith('-zh.pdf') or original_filename.endswith('-en.pdf'):
-            # 在同一目录下查找原始文件
-            base_filename = original_filename[:-7]  # 移除 '-zh.pdf' 或 '-en.pdf'
-            original_file = input_file.parent / f"{base_filename}.pdf"
-            if original_file.exists():
-                input_file = original_file
-                print(f"Using original file: {input_file}")
-        
-        # 确保文件路径是字符串类型
-        param["files"] = [str(input_file)]  # 转换为字符串
-        
-        # 设置输出目录为任务目录
-        task_dir = Path("pdf2zh_files") / task_id
-        param["output"] = str(task_dir)  # 确保输出路径也是字符串
-        
-        print(f"Processing translation with files: {param['files']}")
-        print(f"Output directory: {param['output']}")
-        
-        # 执行翻译
-        extract_text(**param)
-        
-        # 更新输出文件路径
-        filename = input_file.stem
-        # 移除可能存在的 -zh 或 -en 后缀
-        if filename.endswith('-zh') or filename.endswith('-en'):
-            filename = filename[:-3]
-        output_file = task_dir / f"{filename}-zh.pdf"
-        output_file_dual = task_dir / f"{filename}-dual.pdf"
-        
-        print(f"Checking output files: {output_file}, {output_file_dual}")
-        
-        if output_file.exists() and output_file_dual.exists():
-            status_data = get_task_status(task_id)
-            status_data.update({
-                "status": TaskStatus.COMPLETED,
-                "progress": 1.0,
-                "message": "Translation completed successfully",
-                "output_file": get_download_url(task_id, False),
-                "output_file_dual": get_download_url(task_id, True)
-            })
-            save_task_status(task_id, status_data)
-        else:
-            raise Exception(f"Translation completed but output files not found. Expected: {output_file}, {output_file_dual}")
-            
-    except Exception as e:
-        import traceback
-        error_msg = f"Translation error: {str(e)}\n{traceback.format_exc()}"
-        print(error_msg)
-        status_data = get_task_status(task_id)
-        status_data.update({
-            "status": TaskStatus.FAILED,
-            "error": error_msg,
-            "progress": 0,
-            "message": "Translation failed"
-        })
-        save_task_status(task_id, status_data)
+    return progress_callback
 
 def calculate_md5(file_path: str) -> str:
     """计算文件的MD5值作为任务ID"""
@@ -253,33 +205,6 @@ def calculate_md5(file_path: str) -> str:
         for byte_block in iter(lambda: f.read(4096), b""):
             md5_hash.update(byte_block)
     return md5_hash.hexdigest()
-
-def save_file_hash_mapping(file_hash: str, task_id: str):
-    """保存文件哈希值与任务ID的映射关系"""
-    key = f"{REDIS_KEY_PREFIX}hash:{file_hash}"
-    if redis_client:
-        try:
-            redis_client.set(key, task_id)
-            redis_client.expire(key, 86400 * 30)  # 30天过期
-        except redis.RedisError as e:
-            print(f"Error saving hash mapping to Redis: {str(e)}")
-    else:
-        # 使用内存存储
-        file_hash_mapping[file_hash] = task_id
-
-def get_task_by_file_hash(file_hash: str) -> Optional[str]:
-    """通过文件哈希值获取任务ID"""
-    key = f"{REDIS_KEY_PREFIX}hash:{file_hash}"
-    if redis_client:
-        try:
-            return redis_client.get(key)
-        except redis.RedisError as e:
-            print(f"Error getting hash mapping from Redis: {str(e)}")
-            return file_hash_mapping.get(file_hash)
-    return file_hash_mapping.get(file_hash)
-
-# 存储文件哈希值与任务ID的映射关系
-file_hash_mapping: Dict[str, str] = {}
 
 @app.post("/upload")
 async def upload_file(file: UploadFile):
@@ -448,7 +373,7 @@ async def translate_pdf(
         "service": f"{selected_service}:{request.model_id}" if request.model_id else selected_service,
         "output": output_dir,
         "thread": 4,
-        "callback": lambda t: update_task_progress(task_id, t)
+        "callback": update_task_progress(task_id, tqdm.tqdm(total=100)),  # 使用回调函数更新进度
     }
     
     # 启动异步任务
@@ -460,6 +385,80 @@ async def translate_pdf(
         "status": TaskStatus.PENDING,
         "message": "Translation task started"
     }
+
+async def process_translation(task_id: str, input_file: Path, param: dict):
+    """处理翻译任务"""
+    try:
+        print(f"Starting translation with parameters: {param}")
+        status_data = get_task_status(task_id)
+        status_data["status"] = TaskStatus.PROCESSING
+        save_task_status(task_id, status_data)
+        
+        # 确保使用原始文件
+        original_filename = input_file.name
+        if original_filename.endswith('-zh.pdf') or original_filename.endswith('-en.pdf'):
+            # 在同一目录下查找原始文件
+            base_filename = original_filename[:-7]  # 移除 '-zh.pdf' 或 '-en.pdf'
+            original_file = input_file.parent / f"{base_filename}.pdf"
+            if original_file.exists():
+                input_file = original_file
+                print(f"Using original file: {input_file}")
+        
+        # 确保文件路径是字符串类型
+        param["files"] = [str(input_file)]  # 转换为字符串
+        
+        # 设置输出目录为任务目录
+        task_dir = Path("pdf2zh_files") / task_id
+        param["output"] = str(task_dir)  # 确保输出路径也是字符串
+        
+        print(f"Processing translation with files: {param['files']}")
+        print(f"Output directory: {param['output']}")
+        
+        # 执行翻译
+        extract_text(**param)
+        
+        # 更新输出文件路径
+        filename = input_file.stem
+        # 移除可能存在的 -zh 或 -en 后缀
+        if filename.endswith('-zh') or filename.endswith('-en'):
+            filename = filename[:-3]
+        output_file = task_dir / f"{filename}-zh.pdf"
+        output_file_dual = task_dir / f"{filename}-dual.pdf"
+        
+        print(f"Checking output files: {output_file}, {output_file_dual}")
+        
+        if output_file.exists() and output_file_dual.exists():
+            status_data = get_task_status(task_id)
+            status_data.update({
+                "status": TaskStatus.COMPLETED,
+                "progress": 1.0,
+                "message": "Translation completed successfully",
+                "output_file": get_download_url(task_id, False),
+                "output_file_dual": get_download_url(task_id, True)
+            })
+            save_task_status(task_id, status_data)
+        else:
+            raise Exception(f"Translation completed but output files not found. Expected: {output_file}, {output_file_dual}")
+            
+    except Exception as e:
+        import traceback
+        error_msg = f"Translation error: {str(e)}\n{traceback.format_exc()}"
+        print(error_msg)
+        status_data = get_task_status(task_id)
+        status_data.update({
+            "status": TaskStatus.FAILED,
+            "error": error_msg,
+            "progress": 0,
+            "message": "Translation failed"
+        })
+        save_task_status(task_id, status_data)
+
+def get_download_url(task_id: str, dual: bool = False) -> str:
+    """生成下载URL"""
+    base_url = f"{BASE_URL}/download/{task_id}"
+    if dual:
+        return f"{base_url}?dual=true"
+    return base_url
 
 @app.get("/status/{task_id}", response_model=TranslationStatus)
 async def get_translation_status(task_id: str):
