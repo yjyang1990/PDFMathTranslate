@@ -9,34 +9,32 @@ class WordStyleCopier:
     def copy_run_style(new_run, source_run):
         """完整复制run级别的样式"""
         if source_run.font is not None:
-            if new_run.font is None:
-                return
-            
-            # 基础字体属性
-            new_run.font.name = source_run.font.name
-            new_run.font.size = source_run.font.size
-            new_run.font.bold = source_run.font.bold
-            new_run.font.italic = source_run.font.italic
-            new_run.font.underline = source_run.font.underline
-            new_run.font.strike = source_run.font.strike
-            new_run.font.subscript = source_run.font.subscript
-            new_run.font.superscript = source_run.font.superscript
-            new_run.font.shadow = source_run.font.shadow
-            new_run.font.outline = source_run.font.outline
-            new_run.font.rtl = source_run.font.rtl
-            new_run.font.small_caps = source_run.font.small_caps
-            new_run.font.all_caps = source_run.font.all_caps
-            new_run.font.double_strike = source_run.font.double_strike
-            new_run.font.emboss = source_run.font.emboss
-            new_run.font.imprint = source_run.font.imprint
-            
-            # 颜色属性
-            if source_run.font.color.rgb is not None:
-                new_run.font.color.rgb = source_run.font.color.rgb
-            
-            # 突出显示颜色
-            if hasattr(source_run.font, 'highlight_color'):
-                new_run.font.highlight_color = source_run.font.highlight_color
+            if new_run.font is not None:
+                # 基础字体属性
+                new_run.font.name = source_run.font.name
+                new_run.font.size = source_run.font.size
+                new_run.font.bold = source_run.font.bold
+                new_run.font.italic = source_run.font.italic
+                new_run.font.underline = source_run.font.underline
+                new_run.font.strike = source_run.font.strike
+                new_run.font.subscript = source_run.font.subscript
+                new_run.font.superscript = source_run.font.superscript
+                new_run.font.shadow = source_run.font.shadow
+                new_run.font.outline = source_run.font.outline
+                new_run.font.rtl = source_run.font.rtl
+                new_run.font.small_caps = source_run.font.small_caps
+                new_run.font.all_caps = source_run.font.all_caps
+                new_run.font.double_strike = source_run.font.double_strike
+                new_run.font.emboss = source_run.font.emboss
+                new_run.font.imprint = source_run.font.imprint
+                
+                # 颜色属性
+                if source_run.font.color.rgb is not None:
+                    new_run.font.color.rgb = source_run.font.color.rgb
+                
+                # 突出显示颜色
+                if hasattr(source_run.font, 'highlight_color'):
+                    new_run.font.highlight_color = source_run.font.highlight_color
 
     @staticmethod
     def copy_paragraph_style(new_paragraph, source_paragraph):
@@ -156,14 +154,48 @@ class WordStyleCopier:
     @staticmethod
     def copy_section_properties(new_section, source_section):
         """复制节属性"""
-        # 页面设置
-        new_section.page_height = source_section.page_height
-        new_section.page_width = source_section.page_width
-        new_section.left_margin = source_section.left_margin
-        new_section.right_margin = source_section.right_margin
-        new_section.top_margin = source_section.top_margin
-        new_section.bottom_margin = source_section.bottom_margin
-        new_section.header_distance = source_section.header_distance
-        new_section.footer_distance = source_section.footer_distance
-        new_section.orientation = source_section.orientation
-        new_section.page_number_restart = source_section.page_number_restart
+        try:
+            # 页面设置
+            new_section.page_height = source_section.page_height
+            new_section.page_width = source_section.page_width
+            new_section.left_margin = source_section.left_margin
+            new_section.right_margin = source_section.right_margin
+            new_section.top_margin = source_section.top_margin
+            new_section.bottom_margin = source_section.bottom_margin
+            new_section.header_distance = source_section.header_distance
+            new_section.footer_distance = source_section.footer_distance
+            new_section.orientation = source_section.orientation
+
+            # 安全复制页码重启属性
+            try:
+                if hasattr(source_section, 'page_number_restart'):
+                    new_section.page_number_restart = source_section.page_number_restart
+            except Exception as e:
+                print(f"[警告] 复制页码重启属性时出错: {e}")
+
+            # 复制页眉和页脚
+            try:
+                # 复制页眉
+                if source_section.header:
+                    new_header = new_section.header
+                    for paragraph in source_section.header.paragraphs:
+                        new_paragraph = new_header.paragraphs[0] if new_header.paragraphs else new_header.add_paragraph()
+                        WordStyleCopier.copy_paragraph_style(new_paragraph, paragraph)
+                        for run in paragraph.runs:
+                            new_run = new_paragraph.add_run()
+                            WordStyleCopier.copy_run_style(new_run, run)
+
+                # 复制页脚
+                if source_section.footer:
+                    new_footer = new_section.footer
+                    for paragraph in source_section.footer.paragraphs:
+                        new_paragraph = new_footer.paragraphs[0] if new_footer.paragraphs else new_footer.add_paragraph()
+                        WordStyleCopier.copy_paragraph_style(new_paragraph, paragraph)
+                        for run in paragraph.runs:
+                            new_run = new_paragraph.add_run()
+                            WordStyleCopier.copy_run_style(new_run, run)
+            except Exception as e:
+                print(f"[警告] 复制页眉页脚时出错: {e}")
+
+        except Exception as e:
+            print(f"[错误] 复制节属性时出错: {e}")

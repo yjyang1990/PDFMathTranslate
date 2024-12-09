@@ -1,13 +1,18 @@
+import os
+import json
+import time
+import hashlib
 import threading
 from docx import Document
+from docx.document import Document as DocxDocument
+from docx.oxml.table import CT_Tbl
+from docx.table import _Cell, Table
+from docx.text.paragraph import Paragraph
 from docx.shared import Pt
 from docx.shared import Inches
 from docx.oxml.ns import qn
-import os
+import concurrent.futures
 import sys
-import time
-import datetime
-import zipfile
 import string
 from .word_style_utils import WordStyleCopier
 from pdf2zh.translator import (
@@ -19,40 +24,40 @@ from pdf2zh.translator import (
     ZhipuTranslator,
     SiliconTranslator
 )
-import concurrent.futures
+from pdf2zh.cache import load_paragraph, write_paragraph, create_cache, deterministic_hash
 
-# 服务映射
-SERVICE_MAP = {
-    "OpenAI": (OpenAITranslator, None),
-    "DeepL": (DeepLTranslator, None),
-    "Google": (GoogleTranslator, None),
-    "Tencent": (TencentTranslator, None),
-    "Azure": (AzureTranslator, None),
-    "Zhipu": (ZhipuTranslator, None),
-    "Silicon": (SiliconTranslator, None)
-}
-
-# 语言映射
-lang_map = {
-    "Chinese": "zh",
-    "English": "en",
-    "Japanese": "ja",
-    "Korean": "ko",
-    "French": "fr",
-    "German": "de",
-    "Russian": "ru",
-    "Spanish": "es",
-    "Portuguese": "pt",
-    "Italian": "it",
-    "Dutch": "nl",
-    "Polish": "pl",
-    "Turkish": "tr",
-    "Arabic": "ar",
-    "Thai": "th",
-    "Vietnamese": "vi",
-    "Indonesian": "id",
-    "Hindi": "hi",
-}
+# 并行翻译文本，同时保持原始顺序
+def translate_text(index, text_item, translator, lang_from, lang_to, service):
+    try:
+        # 生成文本的哈希值
+        text_hash = deterministic_hash(text_item['text'])
+        
+        # 尝试从缓存加载翻译
+        cached_translation = load_paragraph(text_hash, f"{lang_from}_{lang_to}_{service}")
+        
+        if cached_translation:
+            print(f"[缓存] 使用缓存翻译: {text_item['text'][:30]}...")
+            translated_text = cached_translation
+        else:
+            # 如果缓存未命中，进行翻译
+            translated_text = translator.translate(text_item['text'])
+            
+            # 创建缓存目录
+            create_cache(text_hash)
+            
+            # 保存翻译到缓存
+            write_paragraph(text_hash, f"{lang_from}_{lang_to}_{service}", translated_text)
+        
+        return {
+            'index': index, 
+            'text': translated_text
+        }
+    except Exception as e:
+        print(f"[错误] 翻译文本时出错: {e}")
+        return {
+            'index': index, 
+            'text': text_item['text']  # 返回原文本
+        }
 
 def start(trans):
     """开始Word文档翻译"""
@@ -70,8 +75,24 @@ def start(trans):
         print(f"[错误] 无法访问文档: {str(e)}")
         return False
 
+    # 创建新文档并复制原始文档样式
+    translated_document = Document()
+    
+    # 复制文档样式
+    def deep_copy_document_styles(source_doc, target_doc):
+        """深度复制文档样式，确保格式完全一致"""
+        # 复制文档样式
+        for style in source_doc.styles:
+            try:
+                if style.name not in target_doc.styles:
+                    target_doc.styles.add_style(style.name, style.type)
+            except Exception as e:
+                print(f"[警告] 复制样式 {style.name} 时出错: {e}")
+
+    deep_copy_document_styles(document, translated_document)
+
     texts = []
-    trans_type = trans.get('type', 'trans_text_both_inherit')
+    trans_type = trans.get('type', 'trans_text_only_inherit')
 
     # 根据翻译类型读取文本
     if trans_type in ["trans_text_only_inherit", "trans_all_only_inherit", "trans_all_both_inherit"]:
@@ -107,37 +128,28 @@ def start(trans):
         model=model_id
     )
 
-    # 并行翻译文本，同时保持原始顺序
-    def translate_text(index, text_item):
-        try:
-            translated_text = translator.translate(text_item['text'])
-            return index, {
-                'text': translated_text, 
-                'complete': True,
-                'original': text_item
-            }
-        except Exception as e:
-            print(f"[错误] 翻译失败: {str(e)}")
-            return index, {
-                'text': text_item['text'], 
-                'complete': False,
-                'original': text_item
-            }
-
     # 使用线程池进行并行翻译，并保持原始顺序
     translated_texts = [None] * len(texts)
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_threads) as executor:
         # 提交所有文本片段到线程池，同时传递原始索引
         futures = [
-            executor.submit(translate_text, i, text_item) 
+            executor.submit(
+                translate_text, 
+                i, 
+                text_item, 
+                translator, 
+                lang_from, 
+                lang_to, 
+                service
+            ) 
             for i, text_item in enumerate(texts)
         ]
         
         # 按原始顺序收集结果
         for future in concurrent.futures.as_completed(futures):
             try:
-                index, result = future.result()
-                translated_texts[index] = result
+                result = future.result()
+                translated_texts[result['index']] = result
             except Exception as exc:
                 print(f'[错误] 翻译任务生成异常: {exc}')
 
@@ -159,11 +171,73 @@ def start(trans):
 
     write_func = write_type_map.get(trans_type)
     if write_func:
-        write_func(document, texts, text_count, True)
+        # 修改传入的文本格式
+        translated_texts_for_write = [{'text': t['text']} for t in texts]
+        print(f"[调试] 准备写入的文本: {translated_texts_for_write}")
+        
+        # 初始化文本计数器
+        text_count = 0
+        
+        # 调用写入函数，并传递文本计数器
+        text_count = write_func(translated_document, translated_texts_for_write, text_count, True)
+        
+        print(f"[调试] 最终处理的文本数量: {text_count}")
+        
+        # 如果没有文本被写入，尝试强制写入
+        if text_count == 0 and len(translated_texts_for_write) > 0:
+            print("[警告] 未写入任何文本，尝试强制写入")
+            for paragraph in translated_document.paragraphs:
+                paragraph.clear()
+            
+            for text in translated_texts_for_write:
+                translated_document.add_paragraph(text['text'])
+
+    # 复制媒体元素
+    def copy_media_elements(source_doc, target_doc):
+        """复制文档中的图片、图表和其他媒体元素"""
+        # 复制内嵌图片和表格
+        for paragraph in source_doc.paragraphs:
+            new_paragraph = target_doc.add_paragraph()
+            WordStyleCopier.copy_paragraph_style(new_paragraph, paragraph)
+            
+            for run in paragraph.runs:
+                new_run = new_paragraph.add_run()
+                WordStyleCopier.copy_run_style(new_run, run)
+                
+                # 复制图片
+                if run.element.find('.//pic:pic', namespaces={'pic': 'http://schemas.openxmlformats.org/drawingml/2006/picture'}) is not None:
+                    WordStyleCopier.copy_image(new_paragraph, run)
+
+        # 复制表格
+        for source_table in source_doc.tables:
+            new_table = target_doc.add_table(rows=len(source_table.rows), cols=len(source_table.columns[0].cells))
+            WordStyleCopier.copy_table_style(new_table, source_table)
+            
+            for i, row in enumerate(source_table.rows):
+                for j, cell in enumerate(row.cells):
+                    new_cell = new_table.cell(i, j)
+                    new_cell.text = cell.text
+                    
+                    # 复制单元格样式
+                    WordStyleCopier.copy_cell_style(new_cell, cell)
+                    
+                    # 复制单元格内段落样式
+                    for k, paragraph in enumerate(cell.paragraphs):
+                        if k < len(new_cell.paragraphs):
+                            new_paragraph = new_cell.paragraphs[k]
+                            WordStyleCopier.copy_paragraph_style(new_paragraph, paragraph)
+                            
+                            for l, run in enumerate(paragraph.runs):
+                                if l < len(new_paragraph.runs):
+                                    new_run = new_paragraph.runs[l]
+                                    WordStyleCopier.copy_run_style(new_run, run)
+
+    # 复制媒体元素
+    copy_media_elements(document, translated_document)
 
     # 保存文档
     output_path = trans['file_path'].replace('.docx', '_translated.docx')
-    document.save(output_path)
+    translated_document.save(output_path)
     print(f"[完成] 文档翻译完成，保存至 {output_path}")
     return True
 
@@ -231,22 +305,60 @@ def write_both_new(document, texts, text_count, onlyText):
             for cell in row.cells:
                 write_both_new(cell, texts, text_count, onlyText)
 
-def write_only_new(document, texts, text_count, onlyText):
+def write_only_new(document, texts, text_count, onlyText=True):
     """仅写入新文本"""
-    for paragraph in document.paragraphs:
-        text_count += write_run(paragraph.runs, texts)
-
-        if paragraph.hyperlinks:
-            for hyperlink in paragraph.hyperlinks:
-                text_count += write_run(hyperlink.runs, texts)
-
-        if onlyText:
-            clear_image(paragraph)
-
-    for table in document.tables:
-        for row in table.rows:
-            for cell in row.cells:
-                write_cell_text(cell, texts)
+    print(f"[调试] 进入 write_only_new 函数，文本数量: {len(texts)}, 当前文本计数: {text_count}")
+    
+    # 处理文档对象
+    if isinstance(document, (DocxDocument, Document)):
+        # 遍历文档段落
+        for paragraph in document.paragraphs:
+            print(f"[调试] 处理段落: {paragraph.text}")
+            
+            # 清空段落
+            paragraph.clear()
+            
+            # 如果还有未写入的文本
+            if text_count < len(texts):
+                # 获取当前文本
+                current_text = texts[text_count]['text']
+                print(f"[调试] 写入文本: {current_text}")
+                
+                # 添加新的文本run
+                paragraph.add_run(current_text)
+                
+                # 增加文本计数
+                text_count += 1
+            
+            # 如果没有更多文本，保持段落为空
+            else:
+                print("[调试] 没有更多文本可写入")
+        
+        # 处理表格中的文本
+        for table in document.tables:
+            for row in table.rows:
+                for cell in row.cells:
+                    text_count = write_only_new(cell, texts, text_count, onlyText)
+    
+    # 处理单元格对象
+    elif isinstance(document, (_Cell, Table)):
+        for paragraph in document.paragraphs:
+            paragraph.clear()
+            
+            # 如果还有未写入的文本
+            if text_count < len(texts):
+                # 获取当前文本
+                current_text = texts[text_count]['text']
+                print(f"[调试] 写入单元格文本: {current_text}")
+                
+                # 添加新的文本run
+                paragraph.add_run(current_text)
+                
+                # 增加文本计数
+                text_count += 1
+    
+    print(f"[调试] write_only_new 完成，处理了 {text_count} 个文本")
+    return text_count
 
 def write_rune_both(document, texts, text_count, onlyText):
     """保留原文并继承版面"""
