@@ -69,16 +69,34 @@ class WordStyleCopier:
     @staticmethod
     def copy_table_style(new_table, source_table):
         """完整复制表格样式"""
+        # 打印源表和目标表信息
+        print(f"Copying table style - Source table rows: {len(source_table.rows)}, New table rows: {len(new_table.rows)}")
+        
         # 表格整体样式
-        new_table.style = source_table.style
-        new_table.alignment = source_table.alignment
+        try:
+            new_table.style = source_table.style
+            print(f"Table style set to: {source_table.style}")
+        except Exception as e:
+            print(f"Error setting table style: {e}")
+        
+        try:
+            new_table.alignment = source_table.alignment
+            print(f"Table alignment set to: {source_table.alignment}")
+        except Exception as e:
+            print(f"Error setting table alignment: {e}")
         
         # 复制每个单元格的样式
         for i, row in enumerate(source_table.rows):
+            print(f"Processing row {i} - Source row cells: {len(row.cells)}")
             for j, cell in enumerate(row.cells):
-                if i < len(new_table.rows) and j < len(new_table.rows[i].cells):
-                    new_cell = new_table.rows[i].cells[j]
-                    WordStyleCopier.copy_cell_style(new_cell, cell)
+                try:
+                    if i < len(new_table.rows) and j < len(new_table.rows[i].cells):
+                        new_cell = new_table.rows[i].cells[j]
+                        WordStyleCopier.copy_cell_style(new_cell, cell)
+                    else:
+                        print(f"Skipping cell [{i},{j}] - Out of range")
+                except Exception as e:
+                    print(f"Error copying cell style for cell [{i},{j}]: {e}")
 
     @staticmethod
     def copy_cell_style(new_cell, source_cell):
@@ -93,7 +111,11 @@ class WordStyleCopier:
         new_cell.width = source_cell.width
         
         # 单元格边距
-        new_cell._tc.tcPr.tcMar = source_cell._tc.tcPr.tcMar
+        try:
+            if hasattr(source_cell._tc.tcPr, 'tcMar'):
+                new_cell._tc.tcPr.tcMar = source_cell._tc.tcPr.tcMar
+        except Exception as e:
+            pass
 
     @staticmethod
     def copy_image(new_paragraph, image_run):
