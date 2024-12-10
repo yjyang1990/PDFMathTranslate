@@ -87,6 +87,7 @@ uvicorn pdf2zh.api:app --reload --port 8080
 ```
 http://127.0.0.1:8080
 ```
+下载 [setup.bat](https://raw.githubusercontent.com/Byaidu/PDFMathTranslate/refs/heads/main/setup.bat) 并双击运行
 
 <h3 id="gui">方法三、图形交互界面</h3>
 

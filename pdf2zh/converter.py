@@ -304,60 +304,66 @@ class TranslateConverter(PDFConverterEx):
                     cur_v = False
                 else:
                     cur_v = True
-            # 判定括号组是否属于公式
-            if not cur_v:
-                if vstk and child.get_text() == "(":
-                    cur_v = True
-                    vbkt += 1
-                if vbkt and child.get_text() == ")":
-                    cur_v = True
-                    vbkt -= 1
-            if (                                                        # 判定当前公式是否结束
-                not cur_v                                               # 1. 当前字符不属于公式
-                or cls != xt_cls                                        # 2. 当前字符与前一个字符不属于同一段落
-                or (abs(child.x0 - xt.x0) > vmax and cls != 0)          # 3. 段落内换行，可能是一长串斜体的段落，也可能是段内分式换行，这里设个阈值进行区分
-            ):
-                if vstk:
-                    if (                                                # 根据公式右侧的文字修正公式的纵向偏移
-                        not cur_v                                       # 1. 当前字符不属于公式
-                        and cls == xt_cls                               # 2. 当前字符与前一个字符属于同一段落
-                        and child.x0 > max([vch.x0 for vch in vstk])    # 3. 当前字符在公式右侧
+                # 判定括号组是否属于公式
+                if not cur_v:
+                    if vstk and child.get_text() == "(":
+                        cur_v = True
+                        vbkt += 1
+                    if vbkt and child.get_text() == ")":
+                        cur_v = True
+                        vbkt -= 1
+                if (                                                        # 判定当前公式是否结束
+                    not cur_v                                               # 1. 当前字符不属于公式
+                    or cls != xt_cls                                        # 2. 当前字符与前一个字符不属于同一段落
+                    # or (abs(child.x0 - xt.x0) > vmax and cls != 0)        # 3. 段落内换行，可能是一长串斜体的段落，也可能是段内分式换行，这里设个阈值进行区分
+                    # 禁止纯公式（代码）段落换行，直到文字开始再重开文字段落，保证只存在两种情况
+                    # A. 纯公式（代码）段落（锚定绝对位置）sstk[-1]=="" -> sstk[-1]=="$v*$"
+                    # B. 文字开头段落（排版相对位置）sstk[-1]!=""
+                    or (sstk[-1] != "" and abs(child.x0 - xt.x0) > vmax)    # 因为 cls==xt_cls==0 一定有 sstk[-1]==""，所以这里不需要再判定 cls!=0
+                ):
+                    if vstk:
+                        if (                                                # 根据公式右侧的文字修正公式的纵向偏移
+                            not cur_v                                       # 1. 当前字符不属于公式
+                            and cls == xt_cls                               # 2. 当前字符与前一个字符属于同一段落
+                            and child.x0 > max([vch.x0 for vch in vstk])    # 3. 当前字符在公式右侧
+                        ):
+                            vfix = vstk[0].y0 - child.y0
+                        if sstk[-1] == "":
+                            xt_cls = -1 # 禁止纯公式段落（sstk[-1]=="$v*$"）的后续连接，但是要考虑新字符和后续字符的连接，所以这里修改的是上个字符的类别
+                        sstk[-1] += f"$v{len(var)}$"
+                        var.append(vstk)
+                        varl.append(vlstk)
+                        varf.append(vfix)
+                        vstk = []
+                        vlstk = []
+                        vfix = 0
+                # 当前字符不属于公式或当前字符是公式的第一个字符
+                if not vstk:
+                    if cls == xt_cls:               # 当前字符与前一个字符属于同一段落
+                        if child.x0 > xt.x1 + 1:    # 添加行内空格
+                            sstk[-1] += " "
+                        elif child.x1 < xt.x0:      # 添加换行空格并标记原文段落存在换行
+                            sstk[-1] += " "
+                            pstk[-1].brk = True
+                    else:                           # 根据当前字符构建一个新的段落
+                        sstk.append("")
+                        pstk.append(Paragraph(child.y0, child.x0, child.x0, child.x0, child.size, False))
+                if not cur_v:                                               # 文字入栈
+                    if (                                                    # 根据当前字符修正段落属性
+                        child.size > pstk[-1].size / 0.79                   # 1. 当前字符显著比段落字体大
+                        or len(sstk[-1].strip()) == 1                       # 2. 当前字符为段落第二个文字（考虑首字母放大的情况）
                     ):
-                        vfix = vstk[0].y0 - child.y0
-                    sstk[-1] += f"$v{len(var)}$"
-                    var.append(vstk)
-                    varl.append(vlstk)
-                    varf.append(vfix)
-                    vstk = []
-                    vlstk = []
-                    vfix = 0
-            # 当前字符不属于公式或当前字符是公式的第一个字符
-            if not vstk:
-                if cls == xt_cls:               # 当前字符与前一个字符属于同一段落
-                    if child.x0 > xt.x1 + 1:    # 添加行内空格
-                        sstk[-1] += " "
-                    elif child.x1 < xt.x0:      # 添加换行空格并标记原文段落存在换行
-                        sstk[-1] += " "
-                        pstk[-1].brk = True
-                else:                           # 根据当前字符构建一个新的段落
-                    sstk.append("")
-                    pstk.append(Paragraph(child.y0, child.x0, child.x0, child.x0, child.size, False))
-            if not cur_v:                                               # 文字入栈
-                if (                                                    # 根据当前字符修正段落属性
-                    child.size > pstk[-1].size / 0.79                   # 1. 当前字符显著比段落字体大
-                    or len(sstk[-1].strip()) == 1                       # 2. 当前字符为段落第二个文字（考虑首字母放大的情况）
-                ):
-                    pstk[-1].y -= child.size - pstk[-1].size             # hack 这个段落纵向位置的修正有问题，不过先凑合用吧
-                    pstk[-1].size = child.size
-                sstk[-1] += child.get_text()
-            else:                                                       # 公式入栈
-                if (                                                    # 根据公式左侧的文字修正公式的纵向偏移
-                    not vstk                                            # 1. 当前字符是公式的第一个字符
-                    and cls == xt_cls                                   # 2. 当前字符与前一个字符属于同一段落
-                    and child.x0 > xt.x0                                # 3. 前一个字符在公式左侧
-                ):
-                    vfix = child.y0 - xt.y0
-                vstk.append(child)
+                        pstk[-1].y -= child.size - pstk[-1].size            # hack 这个段落纵向位置的修正有问题，不过先凑合用吧
+                        pstk[-1].size = child.size
+                    sstk[-1] += child.get_text()
+                else:                                                       # 公式入栈
+                    if (                                                    # 根据公式左侧的文字修正公式的纵向偏移
+                        not vstk                                            # 1. 当前字符是公式的第一个字符
+                        and cls == xt_cls                                   # 2. 当前字符与前一个字符属于同一段落
+                        and child.x0 > xt.x0                                # 3. 前一个字符在公式左侧
+                    ):
+                        vfix = child.y0 - xt.y0
+                    vstk.append(child)
             # 更新段落边界，因为段落内换行之后可能是公式开头，所以要在外边处理
             pstk[-1].x0 = min(pstk[-1].x0, child.x0)
             pstk[-1].x1 = max(pstk[-1].x1, child.x1)
