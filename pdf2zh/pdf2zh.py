@@ -19,7 +19,9 @@ import pymupdf
 import requests
 import tempfile
 
-from pdf2zh import __version__, log
+__version__ = "1.8.7"  # 直接在这里定义版本号
+log = logging.getLogger(__name__)
+
 from pdf2zh.high_level import extract_text_to_fp
 from pdf2zh.doclayout import DocLayoutModel
 
@@ -96,27 +98,24 @@ def extract_text(
         raise PDFValueError("Must provide files to work upon!")
 
     for file in files:
-        if file is str and (file.startswith("http://") or file.startswith("https://")):
-            print("Online files detected, downloading...")
+        if file.startswith("http://") or file.startswith("https://"):
+            # 处理在线文件
             try:
-                r = requests.get(file, allow_redirects=True)
-                if r.status_code == 200:
-                    if not os.path.exists("./pdf2zh_files"):
-                        print("Making a temporary dir for downloading PDF files...")
-                        os.mkdir(os.path.dirname("./pdf2zh_files"))
-                    # Generate unique filename using URL hash
-                    url_hash = hashlib.md5(file.encode()).hexdigest()[:8]
-                    filename = f"./pdf2zh_files/download_{url_hash}.pdf"
-                    with open(filename, "wb") as f:
-                        print(f"Writing the file: {file}...")
-                        f.write(r.content)
-                    file = filename
-                else:
-                    r.raise_for_status()
-            except Exception as e:
-                raise PDFValueError(
-                    f"Errors occur in downloading the PDF file. Please check the link(s).\nError:\n{e}"
-                )
+                response = requests.get(file)
+                response.raise_for_status()
+                with tempfile.NamedTemporaryFile(delete=False) as temp_file:
+                    temp_file.write(response.content)
+                    temp_file_path = temp_file.name
+                doc_en = pymupdf.open(temp_file_path)
+                os.unlink(temp_file_path)
+            except requests.exceptions.RequestException as e:
+                raise PDFValueError(f"Failed to download file: {file}. Error: {str(e)}")
+        else:
+            # 处理本地文件
+            if not os.path.isfile(file):
+                raise PDFValueError(f"Invalid file path: {file}")
+            doc_en = pymupdf.open(file)
+
         filename = os.path.splitext(os.path.basename(file))[0]
         # 移除可能存在的 -zh 或 -en 后缀
         if filename.endswith('-zh') or filename.endswith('-en'):
@@ -137,7 +136,6 @@ def extract_text(
             resfont = "china-ss"
             font_list.append(("china-ss", None))
 
-        doc_en = pymupdf.open(file)
         page_count = doc_en.page_count
         
         # 如果没有指定页面范围，默认处理所有页面

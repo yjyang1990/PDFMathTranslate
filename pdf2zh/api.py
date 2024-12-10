@@ -14,6 +14,8 @@ from dotenv import load_dotenv
 from enum import Enum
 import redis
 
+from task import process_tasks
+
 # 加载环境变量
 load_dotenv()
 
@@ -43,6 +45,10 @@ app = FastAPI(
     description="PDF translation service with multiple translation providers",
     version="1.0.0"
 )
+
+# @app.on_event("startup")
+# async def startup_event():
+#     process_tasks()
 
 # 存储翻译任务的状态
 # translation_tasks = {}  # 移除内存字典
@@ -79,7 +85,7 @@ class TaskStatus(str, Enum):
     CANCELED = "canceled"     # 已取消
 
 class TranslationRequest(BaseModel):
-    """翻译请求参数"""
+    """翻译请��参数"""
     task_id: str
     service: str = "OpenAI"
     apikey: Optional[str] = None
@@ -294,7 +300,7 @@ async def translate_pdf(
         "lang_out": lang_to,
         "service": f"{selected_service}:{request.model_id}" if request.model_id else selected_service,
         "output": str(output_dir),
-        "thread": 4,
+        "thread": 10,
         "callback": update_task_progress(task_id),  # 移除tqdm，使用自定义回调
     }
     
@@ -478,3 +484,9 @@ async def download_file(task_id: str, dual: bool = False):
             status_code=500,
             detail=f"Error downloading file: {str(e)}"
         )
+
+@app.post("/process_tasks")
+async def run_process_tasks(background_tasks: BackgroundTasks):
+    """执行一次任务处理"""
+    background_tasks.add_task(process_tasks)
+    return {"message": "Task processing started"}
