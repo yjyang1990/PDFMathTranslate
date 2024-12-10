@@ -6,3 +6,5 @@ torch
 onnx
 onnxruntime
 tencentcloud-sdk-python
+python-docx>=0.8.11
+lxml>=4.9.0
